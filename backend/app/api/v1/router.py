@@ -15,6 +15,10 @@ from app.api.v1.endpoints import (
     admin_master_key,
     sekolah,
     dinas,
+    superadmin_users,
+    superadmin_monitoring,
+    retention,
+    backup,
 )
 
 api_router = APIRouter()
@@ -40,5 +44,11 @@ api_router.include_router(sindas.router, prefix="/sindas", tags=["SINDAS Integra
 api_router.include_router(sekolah.router, prefix="/sekolah", tags=["Sekolah Biodata"])
 api_router.include_router(dinas.router, prefix="/dinas", tags=["Dinas Pengawasan"])
 
+api_router.include_router(superadmin_users.router)
+api_router.include_router(superadmin_monitoring.router)
 
+# Retention Policy & Legal Hold
+api_router.include_router(retention.router, prefix="/admin", tags=["Retention & Legal Hold"])
 
+# Backup & Restore
+api_router.include_router(backup.router, prefix="/admin", tags=["Backup & Restore"])

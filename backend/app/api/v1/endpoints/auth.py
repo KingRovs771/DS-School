@@ -3,7 +3,7 @@ Auth Endpoints — Login Admin & Siswa, JWT Token, Refresh, Logout, Reset Passwo
 ================================================================================
 Menyediakan REST API otentikasi lengkap untuk admin dan siswa.
 """
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
@@ -16,7 +16,8 @@ from app.core.security import (
     decode_token,
     verify_password
 )
-from app.core.dependencies import get_current_admin
+from typing import Optional
+from app.core.dependencies import get_current_admin, security, HTTPAuthorizationCredentials
 from app.core.totp import (
     generate_totp_secret,
     get_totp_uri,
@@ -30,7 +31,8 @@ from app.models.siswa import Siswa
 from app.schemas.sekolah_schemas import (
     AdminLoginRequest,
     AdminTokenResponse,
-    AdminResponse
+    AdminResponse,
+    SiswaResponse,
 )
 from pydantic import BaseModel, Field, EmailStr
 
@@ -72,7 +74,7 @@ class Disable2FARequest(BaseModel):
 
 # ─── ENDPOINTS ────────────────────────────────────────────────────────────────
 
-@router.post("/login/admin", response_model=AdminTokenResponse, tags=["Authentication"])
+@router.post("/login/admin", tags=["Authentication"])
 async def login_admin(payload: AdminLoginRequest, db: AsyncSession = Depends(get_db)):
     """
     Login operator/admin sekolah menggunakan username atau email.
@@ -86,6 +88,17 @@ async def login_admin(payload: AdminLoginRequest, db: AsyncSession = Depends(get
     )
     result = await db.execute(query)
     admin = result.scalar_one_or_none()
+    
+    is_dinas = False
+    
+    if not admin:
+        # Check DinasAdmin by email
+        from app.models.wilayah import DinasAdmin
+        query_dinas = select(DinasAdmin).where(DinasAdmin.email == payload.username)
+        result_dinas = await db.execute(query_dinas)
+        admin = result_dinas.scalar_one_or_none()
+        if admin:
+            is_dinas = True
     
     # Validasi eksistensi dan is_active
     if not admin or not admin.is_active:
@@ -103,8 +116,8 @@ async def login_admin(payload: AdminLoginRequest, db: AsyncSession = Depends(get
             detail="Username, email, atau password salah"
         )
 
-    # Validasi 2FA jika aktif
-    if admin.two_factor_enabled:
+    # Validasi 2FA jika aktif (hanya untuk Admin reguler)
+    if not is_dinas and admin.two_factor_enabled:
         if not payload.code:
             logger.warning("❌ Admin login failed: 2FA enabled but no code provided", identity=payload.username)
             raise HTTPException(
@@ -129,11 +142,38 @@ async def login_admin(payload: AdminLoginRequest, db: AsyncSession = Depends(get
     refresh = create_refresh_token(subject=f"admin:{admin.id}")
     
     logger.info("✅ Admin logged in successfully", admin_id=admin.id, role=admin.role)
+    if is_dinas:
+        admin_data = {
+            "id": str(admin.id),
+            "username": admin.email,
+            "email": admin.email,
+            "nama_lengkap": admin.nama_lengkap,
+            "role": admin.role,
+            "is_active": admin.is_active,
+            "is_verified": True,
+            "sekolah_id": None,
+            "last_login": admin.last_login,
+            "created_at": admin.created_at
+        }
+    else:
+        admin_data = {
+            "id": admin.id,
+            "username": admin.username,
+            "email": admin.email,
+            "nama_lengkap": admin.nama_lengkap,
+            "role": admin.role,
+            "is_active": admin.is_active,
+            "is_verified": admin.is_verified,
+            "sekolah_id": admin.sekolah_id,
+            "last_login": admin.last_login,
+            "created_at": admin.created_at
+        }
+        
     return {
         "access_token": access,
         "refresh_token": refresh,
         "expires_in": 1800,  # 30 menit
-        "admin": admin
+        "admin": admin_data
     }
 
 
@@ -172,15 +212,19 @@ async def login_siswa(payload: SiswaLoginRequest, db: AsyncSession = Depends(get
             detail="NIS atau password salah"
         )
         
-    # Generate tokens
-    access = create_access_token(subject=f"siswa:{siswa.id}", extra_claims={"role": "siswa"})
+    # Generate tokens (Siswa access token 2 jam / 7200 detik)
+    access = create_access_token(
+        subject=f"siswa:{siswa.id}", 
+        expires_delta=timedelta(hours=2),
+        extra_claims={"role": "siswa"}
+    )
     refresh = create_refresh_token(subject=f"siswa:{siswa.id}")
     
     logger.info("✅ Siswa logged in successfully", siswa_id=siswa.id, nis=siswa.nis)
     return {
         "access_token": access,
         "refresh_token": refresh,
-        "expires_in": 1800,  # 30 menit
+        "expires_in": 7200,  # 2 jam (7200 detik)
         "siswa": {
             "id": siswa.id,
             "nis": siswa.nis,
@@ -206,12 +250,17 @@ async def refresh_token(payload: RefreshRequest, db: AsyncSession = Depends(get_
         subject = decoded.get("sub")
         # Generate token akses baru
         role = "siswa" if subject.startswith("siswa:") else "admin"
-        access = create_access_token(subject=subject, extra_claims={"role": role})
+        expires_delta = timedelta(hours=2) if role == "siswa" else None
+        access = create_access_token(
+            subject=subject, 
+            expires_delta=expires_delta,
+            extra_claims={"role": role}
+        )
         
         return {
             "access_token": access,
             "token_type": "bearer",
-            "expires_in": 1800
+            "expires_in": 7200 if role == "siswa" else 1800
         }
     except Exception:
         raise HTTPException(
@@ -333,3 +382,149 @@ async def disable_2fa(
     
     logger.info("🔑 2FA disabled", admin_id=current_admin.id)
     return {"status": "success", "message": "Otentikasi Dua Faktor (2FA) berhasil dinonaktifkan"}
+
+
+# ─── ENDPOINTS PROFIL & AKSES SISWA ──────────────────────────────────────────
+
+class SiswaSelfUpdate(BaseModel):
+    email: Optional[EmailStr] = None
+    telepon: Optional[str] = Field(None, max_length=20)
+
+
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@router.get("/me", tags=["Authentication"])
+async def get_current_user_me(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Mengambil profil lengkap pengguna (Siswa, Admin Sekolah, atau DinasAdmin) yang sedang login.
+    """
+    try:
+        payload = decode_token(credentials.credentials)
+        subject: str = payload.get("sub", "")
+        role = payload.get("role")
+        
+        if subject.startswith("siswa:"):
+            siswa_id = int(subject.split(":")[1])
+            res = await db.execute(select(Siswa).where(Siswa.id == siswa_id))
+            siswa = res.scalar_one_or_none()
+            if not siswa or not siswa.is_active:
+                raise HTTPException(status_code=404, detail="Siswa tidak ditemukan atau tidak aktif")
+            return SiswaResponse.model_validate(siswa)
+            
+        elif subject.startswith("admin:"):
+            raw_id = subject.split(":")[1]
+            if role == "dinas_pendidikan":
+                from app.models.wilayah import DinasAdmin
+                res = await db.execute(select(DinasAdmin).where(DinasAdmin.id == raw_id))
+                dinas = res.scalar_one_or_none()
+                if not dinas:
+                    raise HTTPException(status_code=404, detail="Admin Dinas tidak ditemukan")
+                return {
+                    "id": str(dinas.id),
+                    "email": dinas.email,
+                    "nama_lengkap": dinas.nama_lengkap,
+                    "role": dinas.role,
+                    "kabupaten_id": dinas.kabupaten_id
+                }
+            else:
+                admin_id = int(raw_id)
+                res = await db.execute(select(Admin).where(Admin.id == admin_id))
+                admin = res.scalar_one_or_none()
+                if not admin:
+                    raise HTTPException(status_code=404, detail="Admin tidak ditemukan")
+                return AdminResponse.model_validate(admin)
+        else:
+            raise HTTPException(status_code=401, detail="Token sub tidak valid")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("❌ Failed to fetch /auth/me profile", error=str(e))
+        raise HTTPException(status_code=401, detail="Token tidak valid atau kadaluarsa")
+
+
+@router.put("/me", response_model=SiswaResponse, tags=["Authentication"])
+async def update_current_user_me(
+    payload: SiswaSelfUpdate,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Memperbarui profil mandiri siswa (email & telepon).
+    """
+    token_payload = decode_token(credentials.credentials)
+    subject: str = token_payload.get("sub", "")
+    if not subject.startswith("siswa:"):
+        raise HTTPException(status_code=403, detail="Hanya siswa yang dapat mengubah profil mandiri ini")
+        
+    siswa_id = int(subject.split(":")[1])
+    res = await db.execute(select(Siswa).where(Siswa.id == siswa_id))
+    siswa = res.scalar_one_or_none()
+    if not siswa:
+        raise HTTPException(status_code=404, detail="Siswa tidak ditemukan")
+        
+    if payload.email is not None:
+        siswa.email = payload.email
+    if payload.telepon is not None:
+        siswa.telepon = payload.telepon
+        
+    siswa.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(siswa)
+    return SiswaResponse.model_validate(siswa)
+
+
+@router.post("/change-password", tags=["Authentication"])
+async def change_password(
+    payload: ChangePasswordRequest,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Mengubah password untuk akun yang sedang login (Siswa atau Admin).
+    """
+    token_payload = decode_token(credentials.credentials)
+    subject: str = token_payload.get("sub", "")
+    role = token_payload.get("role")
+    
+    if subject.startswith("siswa:"):
+        siswa_id = int(subject.split(":")[1])
+        res = await db.execute(select(Siswa).where(Siswa.id == siswa_id))
+        siswa = res.scalar_one_or_none()
+        if not siswa:
+            raise HTTPException(status_code=404, detail="Siswa tidak ditemukan")
+        
+        raw_tgl = siswa.tgl_lahir.strftime('%Y-%m-%d') if siswa.tgl_lahir else ""
+        if payload.old_password != raw_tgl:
+            raise HTTPException(status_code=400, detail="Password lama tidak sesuai")
+            
+        siswa.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        return {"status": "success", "message": "Password berhasil diperbarui"}
+        
+    elif subject.startswith("admin:"):
+        raw_id = subject.split(":")[1]
+        if role == "dinas_pendidikan":
+            from app.models.wilayah import DinasAdmin
+            res = await db.execute(select(DinasAdmin).where(DinasAdmin.id == raw_id))
+            admin = res.scalar_one_or_none()
+        else:
+            admin_id = int(raw_id)
+            res = await db.execute(select(Admin).where(Admin.id == admin_id))
+            admin = res.scalar_one_or_none()
+            
+        if not admin or not verify_password(payload.old_password, admin.password_hash):
+            raise HTTPException(status_code=400, detail="Password lama tidak sesuai")
+            
+        from app.core.security import get_password_hash
+        admin.password_hash = get_password_hash(payload.new_password)
+        admin.updated_at = datetime.now(timezone.utc)
+        await db.commit()
+        return {"status": "success", "message": "Password berhasil diperbarui"}
+        
+    raise HTTPException(status_code=400, detail="Tipe user tidak valid")

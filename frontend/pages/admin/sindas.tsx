@@ -7,6 +7,8 @@ import { useState } from "react";
 import AdminLayout from "@/components/AdminLayout";
 import { useRequireAdmin } from "@/hooks/useAdminAuth";
 import toast from "react-hot-toast";
+import { useQuery } from "@tanstack/react-query";
+import { sekolahApi } from "@/lib/api";
 import {
   useSindasSyncStatus,
   useSindasSyncLogs,
@@ -134,6 +136,22 @@ export default function AdminSindas() {
   const [page, setPage] = useState(1);
   const limit = 8;
 
+  // State untuk form konfigurasi API SINDAS
+  const [apiUrl, setApiUrl] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // Query konfigurasi SINDAS sekolah
+  const { isLoading: loadingConfig } = useQuery({
+    queryKey: ["sekolah-sindas-config"],
+    queryFn: async () => {
+      const res = await sekolahApi.getSindasConfig();
+      setApiUrl(res.data.sindas_api_url || "");
+      setApiKey(res.data.sindas_api_key || "");
+      return res.data;
+    }
+  });
+
   // Query status koneksi & statistik sinkronisasi
   const { data: statusData, isLoading: loadingStatus, refetch: refetchStatus } = useSindasSyncStatus();
 
@@ -142,6 +160,24 @@ export default function AdminSindas() {
 
   // Mutation Pull SINDAS manual
   const pullMutation = usePullSindas();
+
+  const handleSaveConfig = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await sekolahApi.updateSindasConfig({
+        sindas_api_url: apiUrl,
+        sindas_api_key: apiKey
+      });
+      toast.success("Konfigurasi API SINDAS berhasil disimpan!");
+      refetchStatus();
+      refetchLogs();
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Gagal menyimpan konfigurasi API SINDAS.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleManualPull = () => {
     if (confirm("Mulai sinkronisasi data siswa dari eksternal SINDAS API?")) {
@@ -180,6 +216,56 @@ export default function AdminSindas() {
       </Head>
 
       <div className="space-y-6 font-body text-neutral-800">
+
+        {/* Configuration Form */}
+        <div className="bg-white border border-[#D4DDD9] rounded-[20px] p-6 shadow-sm">
+          <h3 className="font-display font-bold text-neutral-950 text-sm mb-4">Pengaturan API SINDAS</h3>
+          {loadingConfig ? (
+            <div className="flex justify-center py-4">
+              <div className="animate-spin w-5 h-5 border-2 border-[#3DB891] border-t-transparent rounded-full" />
+            </div>
+          ) : (
+            <form onSubmit={handleSaveConfig} className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+              <div className="space-y-1.5">
+                <label htmlFor="apiUrl" className="text-xs font-bold text-gray-500 uppercase tracking-wide">Link API SINDAS (Base URL)</label>
+                <input
+                  id="apiUrl"
+                  type="text"
+                  placeholder="Contoh: http://localhost:8000/api/v1/sindas/mock-api/siswa"
+                  value={apiUrl}
+                  onChange={(e) => setApiUrl(e.target.value)}
+                  className="w-full pl-4 pr-4 py-2.5 bg-gray-50 border border-gray-250 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#3DB891]/20 focus:border-[#3DB891] transition-all"
+                  required
+                />
+              </div>
+              
+              <div className="flex gap-3">
+                <div className="space-y-1.5 flex-1">
+                  <label htmlFor="apiKey" className="text-xs font-bold text-gray-500 uppercase tracking-wide">API Key SINDAS</label>
+                  <input
+                    id="apiKey"
+                    type="password"
+                    placeholder="Masukkan API Key/Token..."
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    className="w-full pl-4 pr-4 py-2.5 bg-gray-50 border border-gray-250 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-[#3DB891]/20 focus:border-[#3DB891] transition-all"
+                    required
+                  />
+                </div>
+                
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="px-5 py-3 bg-[#208C68] hover:bg-[#14503C] disabled:bg-neutral-300 disabled:text-neutral-500 text-white text-xs font-bold rounded-xl transition-all shadow shadow-[#208C68]/15 disabled:shadow-none whitespace-nowrap self-end h-[42px] flex items-center justify-center min-w-[100px]"
+                >
+                  {saving ? (
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  ) : "Simpan"}
+                </button>
+              </div>
+            </form>
+          )}
+        </div>
         
         {/* Status Banner */}
         <div className={clsx(

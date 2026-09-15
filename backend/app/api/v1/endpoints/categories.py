@@ -1,14 +1,15 @@
 """
-Category endpoints
+Category endpoints with multi-tenant isolation support.
 """
-from typing import Any
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from typing import Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import select, or_, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_admin, get_current_any_user
 from app.models.document import Category
+from app.models.sekolah import Sekolah
 from app.schemas.document import CategoryCreate, CategoryResponse
 
 router = APIRouter()
@@ -16,10 +17,54 @@ router = APIRouter()
 
 @router.get("/", response_model=list[CategoryResponse])
 async def list_categories(
+    sekolah_id: Optional[int] = Query(None, description="Filter berdasarkan ID sekolah"),
     db: AsyncSession = Depends(get_db),
-    _: Any = Depends(get_current_any_user),
+    user: Any = Depends(get_current_any_user),
 ):
-    result = await db.execute(select(Category))
+    """
+    Mengambil daftar kategori.
+    - Admin Sekolah melihat kategori global (sekolah_id is NULL) dan kategori sekolah mereka.
+    - Dinas melihat kategori global dan kategori dari sekolah-sekolah binaannya (atau sekolah spesifik yang dipilih).
+    - Super Admin melihat semua kategori atau filter berdasarkan sekolah.
+    """
+    query = select(Category)
+    
+    role_str = getattr(user, "role", None)
+    if role_str:
+        role_val = getattr(role_str, "value", role_str)
+        if role_val in ("admin", "tu_sekolah"):
+            # Paksa filter ke sekolah admin bersangkutan
+            active_sekolah_id = user.sekolah_id
+            query = query.where(or_(Category.sekolah_id.is_(None), Category.sekolah_id == active_sekolah_id))
+        elif role_val == "dinas_pendidikan":
+            if sekolah_id:
+                # Verifikasi sekolah ada di wilayah Dinas
+                stmt_sch = select(Sekolah.id).where(
+                    Sekolah.id == sekolah_id,
+                    Sekolah.kabupaten_id == user.kabupaten_id
+                )
+                res_sch = await db.execute(stmt_sch)
+                if not res_sch.scalar():
+                    raise HTTPException(status_code=403, detail="Sekolah di luar wilayah pantauan Anda")
+                query = query.where(or_(Category.sekolah_id.is_(None), Category.sekolah_id == sekolah_id))
+            else:
+                # Dinas melihat kategori global + semua kategori dari sekolah di wilayahnya
+                stmt_schs = select(Sekolah.id).where(Sekolah.kabupaten_id == user.kabupaten_id)
+                res_schs = await db.execute(stmt_schs)
+                binaan_ids = [row[0] for row in res_schs.all()]
+                query = query.where(or_(Category.sekolah_id.is_(None), Category.sekolah_id.in_(binaan_ids)))
+        elif role_val == "super_admin":
+            if sekolah_id:
+                query = query.where(or_(Category.sekolah_id.is_(None), Category.sekolah_id == sekolah_id))
+    else:
+        # Siswa/User biasa, paksa filter ke sekolah siswa tersebut
+        active_sekolah_id = getattr(user, "sekolah_id", None)
+        if active_sekolah_id:
+            query = query.where(or_(Category.sekolah_id.is_(None), Category.sekolah_id == active_sekolah_id))
+        else:
+            query = query.where(Category.sekolah_id.is_(None))
+
+    result = await db.execute(query)
     return result.scalars().all()
 
 
@@ -27,11 +72,37 @@ async def list_categories(
 async def create_category(
     payload: CategoryCreate,
     db: AsyncSession = Depends(get_db),
-    _: Any = Depends(get_current_admin),
+    user: Any = Depends(get_current_admin),
 ):
-    cat = Category(**payload.model_dump())
+    """
+    Membuat kategori baru.
+    - Admin sekolah hanya bisa membuat kategori untuk sekolahnya sendiri.
+    - Super Admin bisa membuat kategori global (sekolah_id = None) atau spesifik sekolah.
+    """
+    role_val = getattr(user.role, "value", user.role)
+    
+    insert_data = payload.model_dump()
+    if role_val != "super_admin":
+        insert_data["sekolah_id"] = user.sekolah_id
+        
+    # Cek keunikan nama pada scope sekolah tersebut (atau global)
+    check_stmt = select(Category).where(
+        and_(
+            Category.name == insert_data["name"],
+            Category.sekolah_id == insert_data.get("sekolah_id")
+        )
+    )
+    res_check = await db.execute(check_stmt)
+    if res_check.scalar_one_or_none():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Kategori '{insert_data['name']}' sudah ada di sekolah ini/global"
+        )
+
+    cat = Category(**insert_data)
     db.add(cat)
-    await db.flush()
+    await db.commit()
+    await db.refresh(cat)
     return cat
 
 
@@ -39,11 +110,24 @@ async def create_category(
 async def delete_category(
     cat_id: int,
     db: AsyncSession = Depends(get_db),
-    _: Any = Depends(get_current_admin),
+    user: Any = Depends(get_current_admin),
 ):
+    """
+    Menghapus kategori.
+    - Admin sekolah hanya bisa menghapus kategori milik sekolahnya sendiri.
+    - Kategori global (sekolah_id is NULL) tidak boleh dihapus oleh admin biasa.
+    """
     result = await db.execute(select(Category).where(Category.id == cat_id))
     cat = result.scalar_one_or_none()
     if not cat:
         raise HTTPException(status_code=404, detail="Kategori tidak ditemukan")
+        
+    role_val = getattr(user.role, "value", user.role)
+    if role_val != "super_admin":
+        if cat.sekolah_id is None:
+            raise HTTPException(status_code=403, detail="Kategori global tidak boleh dihapus oleh Admin Sekolah")
+        if cat.sekolah_id != user.sekolah_id:
+            raise HTTPException(status_code=403, detail="Anda tidak diizinkan menghapus kategori sekolah lain")
+            
     await db.delete(cat)
-
+    await db.commit()

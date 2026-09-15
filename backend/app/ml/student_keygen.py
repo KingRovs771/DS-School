@@ -238,26 +238,25 @@ def generate_key(siswa_profile: dict, model_path: Union[str, Path] = MODEL_PATH)
     """
     Menghasilkan kunci enkripsi AES-256 (32 bytes) dari profil siswa secara deterministik.
     Kunci TIDAK disimpan di database (zero-storage).
+
+    Alur kriptografi:
+    1. Ekstraksi fitur deterministik 64D dari profil siswa.
+    2. Serialisasi vektor fitur menjadi bytes (IEEE 754 float32).
+    3. HKDF-SHA256 langsung dari feature bytes → 32-byte AES key.
+    
+    Pendekatan ini menggantikan inferensi neural network yang tidak deterministik
+    antar restart container (karena bobot acak tanpa checkpoint tersimpan).
     """
     # 1. Ekstraksi Fitur deterministik 64D
     extractor = StudentFeatureExtractor(SYSTEM_SALT)
     features = extractor.extract(siswa_profile)
 
-    # 2. Konversi ke PyTorch Tensor
-    x = torch.tensor(features, dtype=torch.float32).unsqueeze(0)
+    # 2. Serialisasi vektor fitur ke bytes (deterministik, IEEE 754 float32)
+    feature_bytes = features.astype(np.float32).tobytes()
 
-    # 3. Model Inference (selalu dievaluasi dalam mode deterministik)
-    model = get_model(model_path)
-    model.eval()
-    with torch.no_grad():
-        raw_output = model(x).squeeze(0).cpu().numpy()
-
-    # 4. Quantize [0, 1] float ke raw bytes
-    raw_bytes = (raw_output * 255).astype(np.uint8).tobytes()
-
-    # 5. KDF Post-Processing (HKDF RFC 5869) -> 32 bytes AES-256 key
+    # 3. HKDF RFC 5869 langsung dari feature bytes → 32 bytes AES-256 key
     aes_key = hkdf(
-        ikm=raw_bytes,
+        ikm=feature_bytes,
         length=32,
         salt=SYSTEM_SALT,
         info=b"DMS_SEKOLAH_STUDENT_AES_KEY_v1"

@@ -15,7 +15,7 @@ import enum
 from datetime import datetime, timezone
 
 from sqlalchemy import (
-    DateTime, Enum, ForeignKey, Index, Integer,
+    Boolean, DateTime, Enum, ForeignKey, Index, Integer,
     String, Text, UniqueConstraint, CheckConstraint, JSON,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -243,6 +243,36 @@ class Dokumen(Base):
         DateTime(timezone=True),
         nullable=True,
         comment="Waktu dokumen disetujui (UTC)",
+    )
+
+    # ── Legal Hold & Retention ────────────────────────────────────────────────
+    legal_hold: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+        comment="Apakah dokumen ini dalam status Legal Hold (dilindungi dari hapus/archive)",
+    )
+    legal_hold_by: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("admin.id", ondelete="SET NULL"),
+        nullable=True,
+        comment="FK ke admin yang menetapkan legal hold",
+    )
+    legal_hold_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Waktu legal hold ditetapkan (UTC)",
+    )
+    legal_hold_alasan: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Alasan penetapan legal hold",
+    )
+    retention_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Waktu dokumen kadaluarsa berdasarkan retention policy (UTC)",
     )
 
     # ── Relationships ─────────────────────────────────────────────────────────

@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.dependencies import get_current_admin, get_super_admin
+from app.core.dependencies import get_current_admin, get_tu_sekolah
 from app.models.admin import Admin
 from app.models.sindas_sync_log import SindasSyncLog, SindasSyncStatus
 from app.schemas.sindas_schemas import (
@@ -136,14 +136,19 @@ async def receive_sindas_webhook(
     description="Menampilkan statistik sinkronisasi SINDAS hari ini: total event, berhasil, gagal, dan terlewati.",
 )
 async def get_sindas_sync_status(
-    current_admin: Admin = Depends(get_current_admin),
+    current_admin: Admin = Depends(get_tu_sekolah),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Menampilkan status koneksi SINDAS dan statistik sinkronisasi.
-    Hanya dapat diakses oleh admin yang terautentikasi.
+    Hanya dapat diakses oleh TU Sekolah / Admin Sekolah.
     """
-    return await SindasService.get_sync_status(db)
+    if not current_admin.sekolah_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akun Anda tidak terkait dengan sekolah manapun",
+        )
+    return await SindasService.get_sync_status(db, sekolah_id=current_admin.sekolah_id)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -166,14 +171,20 @@ async def get_sindas_sync_logs(
         description="Filter berdasarkan status: success | failed | skipped",
     ),
     nis: Optional[str] = Query(default=None, description="Filter berdasarkan NIS siswa"),
-    current_admin: Admin = Depends(get_current_admin),
+    current_admin: Admin = Depends(get_tu_sekolah),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Mengembalikan riwayat sinkronisasi SINDAS dengan dukungan filter dan paginasi.
-    Hanya dapat diakses oleh admin yang terautentikasi.
+    Hanya dapat diakses oleh TU Sekolah / Admin Sekolah.
     """
-    query = select(SindasSyncLog).order_by(desc(SindasSyncLog.processed_at))
+    if not current_admin.sekolah_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akun Anda tidak terkait dengan sekolah manapun",
+        )
+        
+    query = select(SindasSyncLog).where(SindasSyncLog.sekolah_id == current_admin.sekolah_id).order_by(desc(SindasSyncLog.processed_at))
 
     if status_filter:
         try:
@@ -193,8 +204,9 @@ async def get_sindas_sync_logs(
     logs = result.scalars().all()
 
     logger.info(
-        "📋 Admin mengakses sync logs SINDAS",
+        "📋 TU Sekolah mengakses sync logs SINDAS",
         admin_id=current_admin.id,
+        sekolah_id=current_admin.sekolah_id,
         count=len(logs),
     )
     return logs
@@ -211,20 +223,17 @@ async def get_sindas_sync_logs(
     summary="Pull manual data siswa dari SINDAS",
     description=(
         "Menarik data siswa secara aktif dari REST API SINDAS. "
-        "Berguna untuk initial sync atau re-sync setelah downtime. "
-        "**Hanya dapat diakses oleh Super Admin.**"
+        "**Hanya dapat diakses oleh TU Sekolah / Admin Sekolah.**"
     ),
 )
 async def pull_from_sindas(
     payload: SindasPullRequest,
-    current_admin: Admin = Depends(get_super_admin),
+    current_admin: Admin = Depends(get_tu_sekolah),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Trigger sinkronisasi aktif: DMS menarik data dari API SINDAS.
-
-    Memerlukan `SINDAS_API_BASE_URL` dan `SINDAS_API_KEY` dikonfigurasi di `.env`.
-    Hanya dapat diakses oleh **Super Admin**.
+    Hanya dapat diakses oleh TU Sekolah / Admin Sekolah.
     """
     if not settings.SINDAS_ENABLED:
         raise HTTPException(
@@ -232,9 +241,19 @@ async def pull_from_sindas(
             detail="Integrasi SINDAS sedang dinonaktifkan (SINDAS_ENABLED=false)",
         )
 
+    if not current_admin.sekolah_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Akun Anda tidak terkait dengan sekolah manapun",
+        )
+
+    # Force sekolah_id to match current_admin.sekolah_id
+    payload.sekolah_id = current_admin.sekolah_id
+
     logger.info(
-        "🔄 Super Admin trigger pull manual SINDAS",
+        "🔄 TU Sekolah trigger pull manual SINDAS",
         admin_id=current_admin.id,
+        sekolah_id=current_admin.sekolah_id,
         request=payload.model_dump(),
     )
 
@@ -260,6 +279,27 @@ async def get_mock_sindas_siswa(
     """
     Mock endpoint untuk menyimulasikan API eksternal SINDAS.
     """
+    return await _get_mock_sindas_data(limit, kelas, sekolah_id)
+
+
+@router.get(
+    "/mock-api/students",
+    summary="Mock API SINDAS untuk Simulasi (Alternative)",
+    description="Mengembalikan data simulasi siswa dari SINDAS.",
+)
+async def get_mock_sindas_students(
+    limit: int = Query(default=10, ge=1),
+    kelas: Optional[str] = Query(default=None),
+    sekolah_id: Optional[int] = Query(default=None),
+):
+    return await _get_mock_sindas_data(limit, kelas, sekolah_id)
+
+
+async def _get_mock_sindas_data(
+    limit: int = Query(default=10, ge=1),
+    kelas: Optional[str] = Query(default=None),
+    sekolah_id: Optional[int] = Query(default=None),
+):
     # Buat beberapa data simulasi siswa
     mock_students = [
         {
@@ -277,7 +317,8 @@ async def get_mock_sindas_siswa(
             "email": "andi.sindas@sch.id",
             "telepon": "081234567890",
             "nama_ortu": "Bambang Wijaya",
-            "sekolah_id": sekolah_id or 1
+            "sekolah_id": sekolah_id or 1,
+            "npsn": "20310801"
         },
         {
             "nis": "222302",
@@ -294,7 +335,8 @@ async def get_mock_sindas_siswa(
             "email": "budi.sindas@sch.id",
             "telepon": "081234567891",
             "nama_ortu": "Hadi Santoso",
-            "sekolah_id": sekolah_id or 1
+            "sekolah_id": sekolah_id or 1,
+            "npsn": "20310801"
         },
         {
             "nis": "222303",
@@ -311,7 +353,8 @@ async def get_mock_sindas_siswa(
             "email": "citra.sindas@sch.id",
             "telepon": "081234567892",
             "nama_ortu": "Lestari",
-            "sekolah_id": sekolah_id or 1
+            "sekolah_id": sekolah_id or 1,
+            "npsn": "20310802"
         },
         {
             "nis": "212208",
@@ -328,7 +371,8 @@ async def get_mock_sindas_siswa(
             "email": "dewi.sindas@sch.id",
             "telepon": "081234567893",
             "nama_ortu": "Sartono",
-            "sekolah_id": sekolah_id or 1
+            "sekolah_id": sekolah_id or 1,
+            "npsn": "20310801"
         },
         {
             "nis": "212209",
@@ -345,7 +389,8 @@ async def get_mock_sindas_siswa(
             "email": "eko.sindas@sch.id",
             "telepon": "081234567894",
             "nama_ortu": "Prasetyo",
-            "sekolah_id": sekolah_id or 1
+            "sekolah_id": sekolah_id or 1,
+            "npsn": "99999999"
         }
     ]
 

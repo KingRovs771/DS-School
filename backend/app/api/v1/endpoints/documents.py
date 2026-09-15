@@ -177,6 +177,9 @@ async def download_document(
         # Coba get object dari MinIO
         response = client.get_object(settings.MINIO_BUCKET_DOCUMENTS, doc.file_path_encrypted)
         try:
+            encrypted_bytes = response.read()
+            from app.core.crypto import decrypt_document
+            
             # Ambil sekolah info
             query_sekolah = select(Sekolah).where(Sekolah.id == current_siswa.sekolah_id)
             res_sekolah = await db.execute(query_sekolah)

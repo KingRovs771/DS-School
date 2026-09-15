@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Optional, Any
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, BackgroundTasks, Request
 from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
@@ -27,6 +28,37 @@ from app.models.audit_log import AuditLog, UserType, AuditAction, AuditStatus
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
+
+
+async def construct_minio_path(db: AsyncSession, siswa: Siswa, sekolah: Sekolah, jenis_dok: str) -> str:
+    import re
+    def make_safe(val: str) -> str:
+        if not val:
+            return "unknown"
+        cleaned = val.strip().replace(" ", "_")
+        cleaned = re.sub(r'[^a-zA-Z0-9_\-]', '', cleaned)
+        return cleaned
+
+    dinas_name = "Dinas_Pendidikan"
+    if sekolah and sekolah.kabupaten_id:
+        from app.models.wilayah import DinasAdmin, KabupatenKota
+        dinas_stmt = select(DinasAdmin.nama_lengkap).where(DinasAdmin.kabupaten_id == sekolah.kabupaten_id).limit(1)
+        dinas_admin_name = (await db.execute(dinas_stmt)).scalar()
+        if dinas_admin_name:
+            dinas_name = dinas_admin_name
+        else:
+            kab_stmt = select(KabupatenKota.nama).where(KabupatenKota.id == sekolah.kabupaten_id)
+            kab_name = (await db.execute(kab_stmt)).scalar()
+            if kab_name:
+                dinas_name = f"Dinas Pendidikan {kab_name}"
+
+    dinas_seg = make_safe(dinas_name)
+    npsn_seg = make_safe(sekolah.kode)
+    sekolah_seg = make_safe(sekolah.nama)
+    nisn_seg = make_safe(siswa.nisn or siswa.nis)
+    
+    timestamp = int(datetime.now().timestamp())
+    return f"{dinas_seg}/{npsn_seg}/{sekolah_seg}/{nisn_seg}/{jenis_dok}_{timestamp}.enc"
 
 
 # ─── ENDPOINTS DOKUMEN ADMIN ──────────────────────────────────────────────────
@@ -70,6 +102,10 @@ async def upload_document(
     if not siswa:
         raise HTTPException(status_code=404, detail="Siswa tidak ditemukan")
         
+    # Tenant isolation check
+    if current_admin.role != "super_admin" and siswa.sekolah_id != current_admin.sekolah_id:
+        raise HTTPException(status_code=403, detail="Siswa pemilik dokumen di luar wewenang sekolah Anda")
+        
     # 2. Baca file data
     file_bytes = await file.read()
     file_size = len(file_bytes)
@@ -103,7 +139,7 @@ async def upload_document(
     encrypted_file = encrypt_document(file_bytes, student_key)
     
     # Simulasikan path penyimpanan terenkripsi
-    minio_path = f"sekolah_{siswa.sekolah_id}/siswa_{siswa.id}/{jenis_dok}_{int(datetime.now().timestamp())}.enc"
+    minio_path = await construct_minio_path(db, siswa, sekolah, jenis_dok)
     
     # Parse metadata_json jika dikirim
     parsed_meta = None
@@ -160,7 +196,11 @@ async def upload_document(
         background_tasks.add_task(send_document_notification, siswa.email, siswa.nama_lengkap, jenis_dok)
     
     logger.info("✅ Document uploaded & encrypted successfully", dokumen_id=new_doc.id)
-    return new_doc
+    # Eagerly reload with siswa relation so Pydantic doesn't trigger lazy-loading
+    result_doc = await db.execute(
+        select(Dokumen).options(selectinload(Dokumen.siswa)).where(Dokumen.id == new_doc.id)
+    )
+    return result_doc.scalar_one()
 
 
 @router.post("/bulk-upload", tags=["Admin Documents"])
@@ -247,7 +287,7 @@ async def bulk_upload_document(
                     wrapped_key = "base64_wrapped_key_placeholder"
                     
                 encrypted_file = encrypt_document(pdf_bytes, student_key)
-                minio_path = f"sekolah_{siswa.sekolah_id}/siswa_{siswa.id}/{jenis_dok}_{int(datetime.now().timestamp())}.enc"
+                minio_path = await construct_minio_path(db, siswa, sekolah, jenis_dok)
                 
                 try:
                     client = get_minio_client()
@@ -319,12 +359,20 @@ async def update_document_metadata(
     """
     logger.info("📝 Admin/TU editing document", admin_id=current_admin.id, dokumen_id=id, alasan=alasan_edit)
     
-    query = select(Dokumen).where(Dokumen.id == id)
+    query = select(Dokumen)
+    if current_admin.role != "super_admin":
+        query = query.join(Siswa).where(
+            Dokumen.id == id,
+            Siswa.sekolah_id == current_admin.sekolah_id
+        )
+    else:
+        query = query.where(Dokumen.id == id)
+        
     result = await db.execute(query)
     doc = result.scalar_one_or_none()
     
     if not doc:
-        raise HTTPException(status_code=404, detail="Dokumen tidak ditemukan")
+        raise HTTPException(status_code=404, detail="Dokumen tidak ditemukan atau di luar wewenang sekolah Anda")
         
     # --- FASE PRE-VERIFICATION (DEKRIPSI & HASH CHECK) ---
     pdf_bytes = None
@@ -450,7 +498,7 @@ async def update_document_metadata(
         encrypted_file = encrypt_document(file_bytes, student_key)
         
         # Simpan ke MinIO (timpa berkas lama atau buat path baru)
-        minio_path = f"sekolah_{siswa.sekolah_id}/siswa_{siswa.id}/{jenis_dok or doc.jenis_dok}_{int(datetime.now().timestamp())}.enc"
+        minio_path = await construct_minio_path(db, siswa, sekolah, jenis_dok or doc.jenis_dok)
         
         try:
             client = get_minio_client()
@@ -515,7 +563,10 @@ async def update_document_metadata(
     await db.refresh(doc)
     
     logger.info("✅ Document edited successfully", dokumen_id=doc.id)
-    return doc
+    result_doc = await db.execute(
+        select(Dokumen).options(selectinload(Dokumen.siswa)).where(Dokumen.id == doc.id)
+    )
+    return result_doc.scalar_one()
 
 
 @router.delete("/{id}", tags=["Admin Documents"])
@@ -529,12 +580,20 @@ async def delete_document(
     """
     logger.info("🗑️ Admin deleting document", admin_id=current_admin.id, dokumen_id=id)
     
-    query = select(Dokumen).where(Dokumen.id == id)
+    query = select(Dokumen)
+    if current_admin.role != "super_admin":
+        query = query.join(Siswa).where(
+            Dokumen.id == id,
+            Siswa.sekolah_id == current_admin.sekolah_id
+        )
+    else:
+        query = query.where(Dokumen.id == id)
+        
     result = await db.execute(query)
     doc = result.scalar_one_or_none()
     
     if not doc:
-        raise HTTPException(status_code=404, detail="Dokumen tidak ditemukan")
+        raise HTTPException(status_code=404, detail="Dokumen tidak ditemukan atau di luar wewenang sekolah Anda")
         
     await db.delete(doc)
     await db.commit()
@@ -556,8 +615,10 @@ async def get_all_documents(
     """
     logger.info("📄 Admin fetching all documents", admin_id=current_admin.id)
     
-    query = select(Dokumen)
-    
+    query = select(Dokumen).options(selectinload(Dokumen.siswa))
+    if current_admin.role != "super_admin":
+        query = query.join(Siswa).where(Siswa.sekolah_id == current_admin.sekolah_id)
+        
     if siswa_id:
         query = query.where(Dokumen.siswa_id == siswa_id)
     if jenis_dok:
@@ -591,14 +652,22 @@ async def admin_preview_document(
     
     logger.info("👁️  Admin requesting preview", admin_id=current_admin.id, dokumen_id=id)
     
-    query = select(Dokumen).where(Dokumen.id == id)
+    query = select(Dokumen)
+    if current_admin.role != "super_admin":
+        query = query.join(Siswa).where(
+            Dokumen.id == id,
+            Siswa.sekolah_id == current_admin.sekolah_id
+        )
+    else:
+        query = query.where(Dokumen.id == id)
+        
     result = await db.execute(query)
     doc = result.scalar_one_or_none()
     
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Dokumen tidak ditemukan"
+            detail="Dokumen tidak ditemukan atau di luar wewenang sekolah Anda"
         )
         
     # --- AMBIL DARI MINIO ---
@@ -682,14 +751,22 @@ async def admin_download_document(
     
     logger.info("📥 Admin requesting download", admin_id=current_admin.id, dokumen_id=id)
     
-    query = select(Dokumen).where(Dokumen.id == id)
+    query = select(Dokumen)
+    if current_admin.role != "super_admin":
+        query = query.join(Siswa).where(
+            Dokumen.id == id,
+            Siswa.sekolah_id == current_admin.sekolah_id
+        )
+    else:
+        query = query.where(Dokumen.id == id)
+        
     result = await db.execute(query)
     doc = result.scalar_one_or_none()
     
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Dokumen tidak ditemukan"
+            detail="Dokumen tidak ditemukan atau di luar wewenang sekolah Anda"
         )
         
     # --- AMBIL DARI MINIO ---

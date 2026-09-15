@@ -20,7 +20,10 @@ import {
   ShieldCheckIcon,
   CalendarDaysIcon,
   BuildingOffice2Icon,
-  ChartBarSquareIcon
+  BuildingOfficeIcon,
+  ChartBarSquareIcon,
+  ArchiveBoxIcon,
+  CloudArrowUpIcon,
 } from "@heroicons/react/24/solid";
 import { useAdminAuthStore } from "@/store/adminAuthStore";
 import { authApi } from "@/lib/api";
@@ -30,20 +33,27 @@ import { clsx } from "clsx";
 type Role = "super_admin" | "admin" | "tu_sekolah" | "dinas_pendidikan";
 
 const navItems = [
-  { href: "/admin/dashboard", icon: HomeIcon, label: "Dashboard", section: "MENU UTAMA", roles: ["admin", "super_admin", "tu_sekolah"] },
-  { href: "/admin/sekolah", icon: BuildingOffice2Icon, label: "Biodata Sekolah", section: "MENU UTAMA", roles: ["admin", "super_admin", "tu_sekolah"] },
-  { href: "/admin/siswa", icon: UsersIcon, label: "Data Siswa", section: "MENU UTAMA", roles: ["admin", "super_admin", "tu_sekolah"] },
-  { href: "/admin/upload", icon: ArrowUpTrayIcon, label: "Upload Massal", section: "MENU UTAMA", roles: ["admin", "super_admin", "tu_sekolah"] },
-  { href: "/admin/sindas", icon: ClipboardDocumentListIcon, label: "Integrasi SINDAS", section: "MENU UTAMA", roles: ["admin", "super_admin", "tu_sekolah"] },
-  
-  { href: "/admin/dinas", icon: ChartBarSquareIcon, label: "Supervisi Dinas", section: "DINAS PENDIDIKAN", roles: ["dinas_pendidikan"] },
+  { href: "/admin/dashboard", icon: HomeIcon, label: "Dashboard", section: "MENU UTAMA", roles: ["admin", "super_admin", "tu_sekolah", "dinas_pendidikan"] },
+  { href: "/dinas/pendaftaran", icon: UsersIcon, label: "Pendaftaran Sekolah", section: "MENU UTAMA", roles: ["dinas_pendidikan"] },
+  { href: "/dinas/monitoring", icon: FolderIcon, label: "Monitoring Sekolah", section: "MENU UTAMA", roles: ["dinas_pendidikan"] },
+  { href: "/admin/monitoring", icon: FolderIcon, label: "Monitoring Sekolah", section: "MENU UTAMA", roles: ["super_admin"] },
+  { href: "/admin/sekolah", icon: BuildingOffice2Icon, label: "Biodata Sekolah", section: "MENU UTAMA", roles: ["admin", "tu_sekolah"] },
+  { href: "/admin/siswa", icon: UsersIcon, label: "Data Siswa", section: "MENU UTAMA", roles: ["admin", "tu_sekolah"] },
+  { href: "/admin/upload", icon: ArrowUpTrayIcon, label: "Upload Massal", section: "MENU UTAMA", roles: ["admin", "tu_sekolah"] },
+  { href: "/admin/sindas", icon: ClipboardDocumentListIcon, label: "Integrasi SINDAS", section: "MENU UTAMA", roles: ["admin", "tu_sekolah"] },
 
-  { href: "/admin/jenis-dokumen", icon: FolderIcon, label: "Jenis Dokumen", section: "MASTER DATA", roles: ["admin", "super_admin", "tu_sekolah"] },
-  { href: "/admin/tahun-ajaran", icon: CalendarDaysIcon, label: "Tahun Ajaran", section: "MASTER DATA", roles: ["admin", "super_admin", "tu_sekolah"] },
+  { href: "/admin/manajemen-dinas", icon: BuildingOfficeIcon, label: "Manajemen Dinas", section: "PENGGUNA", roles: ["super_admin"] },
+  { href: "/admin/manajemen-tu", icon: UsersIcon, label: "Manajemen TU & Admin", section: "PENGGUNA", roles: ["super_admin"] },
+
+  { href: "/admin/manajemen-sekolah", icon: BuildingOfficeIcon, label: "Manajemen Sekolah", section: "MASTER DATA", roles: ["super_admin"] },
+  { href: "/admin/jenis-dokumen", icon: FolderIcon, label: "Jenis Dokumen", section: "MASTER DATA", roles: ["admin", "tu_sekolah"] },
+  { href: "/admin/tahun-ajaran", icon: CalendarDaysIcon, label: "Tahun Ajaran", section: "MASTER DATA", roles: ["admin", "tu_sekolah"] },
   
   { href: "/admin/master-key", icon: KeyIcon, label: "Master Key", section: "KEAMANAN", roles: ["super_admin"] },
   { href: "/admin/anomali", icon: ShieldCheckIcon, label: "Deteksi Anomali", section: "KEAMANAN", roles: ["admin", "super_admin"] },
-  { href: "/admin/audit-log", icon: ClipboardDocumentListIcon, label: "Audit Trail", section: "KEAMANAN", roles: ["admin", "super_admin"] },
+  { href: "/admin/audit-log", icon: ClipboardDocumentListIcon, label: "Audit Trail", section: "KEAMANAN", roles: ["admin", "super_admin", "dinas_pendidikan"] },
+  { href: "/admin/retention-policy", icon: ArchiveBoxIcon, label: "Retensi & Legal Hold", section: "KEAMANAN", roles: ["dinas_pendidikan", "super_admin"] },
+  { href: "/admin/backup", icon: CloudArrowUpIcon, label: "Backup & Restore", section: "KEAMANAN", roles: ["super_admin"] },
 ];
 
 interface AdminLayoutProps {
@@ -80,7 +90,7 @@ export default function AdminLayout({ children, title }: AdminLayoutProps) {
 
       {/* Navigation Items */}
       <nav className="flex-1 px-3 py-6 space-y-7 overflow-y-auto">
-        {["MENU UTAMA", "DINAS PENDIDIKAN", "MASTER DATA", "KEAMANAN"].map((sectionLabel) => {
+        {["MENU UTAMA", "PENGGUNA", "MASTER DATA", "KEAMANAN"].map((sectionLabel) => {
           const sectionItems = navItems.filter(
             (i) => i.section === sectionLabel && (!admin || i.roles.includes(admin.role))
           );
@@ -90,9 +100,10 @@ export default function AdminLayout({ children, title }: AdminLayoutProps) {
               <p className="text-[10px] font-bold uppercase tracking-widest text-white/30 px-3 mb-2 font-body">{sectionLabel}</p>
               <div className="space-y-1">
                 {sectionItems.map((item) => {
-                  const isActive = router.pathname === item.href;
+                  const itemHref = (item.label === "Dashboard" && admin?.role === "dinas_pendidikan") ? "/dinas/dashboard" : item.href;
+                  const isActive = router.pathname === itemHref;
                   return (
-                    <Link key={item.href} href={item.href} onClick={() => setSidebarOpen(false)} className="block relative">
+                    <Link key={item.href} href={itemHref} onClick={() => setSidebarOpen(false)} className="block relative">
                       <div className={clsx(
                         "flex items-center gap-2.5 px-3 py-2.5 rounded-xl transition-all duration-150 group cursor-pointer font-body relative",
                         isActive

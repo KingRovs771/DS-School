@@ -414,6 +414,7 @@ class SindasService:
             "nama_ortu": nama_ortu,
             "tahun_lulus": raw.get("tahun_lulus"),
             "sekolah_id": raw.get("sekolah_id") or sekolah_id,
+            "npsn": raw.get("npsn") or raw.get("sekolah_npsn") or raw.get("kode_sekolah") or raw.get("kode"),
         }
 
     @staticmethod
@@ -422,14 +423,19 @@ class SindasService:
         db: AsyncSession,
     ) -> SindasPullResponse:
         """
-        Tarik data siswa secara aktif dari REST API Vibe-SchoolData / SINDAS.
-        Endpoint yang dipanggil: GET /students?page=N&per_page=M
-        Mendukung paginasi otomatis untuk menarik seluruh data.
+        Tarik data siswa secara aktif dari REST API Vibe-SchoolData / SINDAS untuk sekolah tertentu.
+        Mencocokkan NPSN pendaftaran sekolah dengan NPSN data siswa.
         """
-        if not settings.SINDAS_API_BASE_URL or not settings.SINDAS_API_KEY:
+        sekolah_id = request.sekolah_id or settings.SINDAS_DEFAULT_SEKOLAH_ID
+        
+        # Load sekolah
+        stmt_sekolah = select(Sekolah).where(Sekolah.id == sekolah_id)
+        sekolah = (await db.execute(stmt_sekolah)).scalar_one_or_none()
+        
+        if not sekolah or not sekolah.sindas_api_url or not sekolah.sindas_api_key:
             return SindasPullResponse(
                 status="error",
-                message="SINDAS_API_BASE_URL atau SINDAS_API_KEY belum dikonfigurasi di .env",
+                message="SINDAS API Link atau API Key belum dikonfigurasi untuk sekolah Anda",
                 total_fetched=0,
                 total_created=0,
                 total_updated=0,
@@ -442,13 +448,12 @@ class SindasService:
         all_students: list[dict] = []
 
         headers = {
-            "Authorization": f"Bearer {settings.SINDAS_API_KEY}",
+            "Authorization": f"Bearer {sekolah.sindas_api_key}",
             "Accept": "application/json",
             "X-Source": "DMS-Sekolah",
         }
 
-        # Endpoint Vibe-SchoolData menggunakan /students
-        base_url = settings.SINDAS_API_BASE_URL.rstrip('/')
+        base_url = sekolah.sindas_api_url.rstrip('/')
         students_url = f"{base_url}/students"
         per_page = min(request.limit, 100)  # Maks 100 per request
 
@@ -493,13 +498,28 @@ class SindasService:
             all_students = all_students[:request.limit]
             total_fetched = len(all_students)
 
-            sekolah_id = request.sekolah_id or settings.SINDAS_DEFAULT_SEKOLAH_ID
-
             for raw in all_students:
                 try:
                     # Mapping field Vibe-SchoolData → SindasSiswaData
                     mapped = SindasService._map_vibe_schooldata_to_sindas(raw, sekolah_id)
                     data = SindasSiswaData(**mapped)
+                    
+                    # Match NPSN pendaftaran (sekolah.kode) dan NPSN di SINDAS
+                    if sekolah and data.npsn and data.npsn != sekolah.kode:
+                        logger.warning("⚠️  Siswa di-skip karena NPSN tidak cocok", student_npsn=data.npsn, school_npsn=sekolah.kode)
+                        total_skipped += 1
+                        
+                        log = SindasSyncLog(
+                            event_type=SindasEventType.PULL,
+                            nis_sindas=data.nis,
+                            payload_raw=raw,
+                            sekolah_id=sekolah_id,
+                            status=SindasSyncStatus.SKIPPED,
+                            error_message=f"NPSN tidak cocok (SINDAS: {data.npsn}, Sekolah: {sekolah.kode})",
+                        )
+                        db.add(log)
+                        continue
+
                     _, changes = await SindasService._upsert_siswa(data, db)
                     action = changes.get("action", "updated")
                     if action == "created":
@@ -514,6 +534,7 @@ class SindasService:
                         event_type=SindasEventType.PULL,
                         nis_sindas=data.nis,
                         payload_raw=raw,
+                        sekolah_id=sekolah_id,
                         status=SindasSyncStatus.SUCCESS,
                         changes_summary=changes,
                     )
@@ -527,6 +548,7 @@ class SindasService:
                         event_type=SindasEventType.PULL,
                         nis_sindas=nis_raw,
                         payload_raw=raw,
+                        sekolah_id=sekolah_id,
                         status=SindasSyncStatus.FAILED,
                         error_message=str(exc),
                     )
@@ -582,39 +604,52 @@ class SindasService:
     # ──────────────────────────────────────────────────────────────────────────
 
     @staticmethod
-    async def get_sync_status(db: AsyncSession) -> SindasSyncStatusResponse:
+    async def get_sync_status(db: AsyncSession, sekolah_id: int) -> SindasSyncStatusResponse:
         """
-        Hitung statistik sinkronisasi hari ini dan kembalikan sebagai SindasSyncStatusResponse.
+        Hitung statistik sinkronisasi hari ini untuk sekolah tertentu dan kembalikan sebagai SindasSyncStatusResponse.
         """
         from datetime import date as date_type
         from sqlalchemy import cast, Date as SADate
 
+        # Load sekolah
+        stmt_sekolah = select(Sekolah).where(Sekolah.id == sekolah_id)
+        sekolah = (await db.execute(stmt_sekolah)).scalar_one_or_none()
+
         today = date_type.today()
 
-        # Total per status hari ini
+        # Total per status hari ini untuk sekolah ini
         rows = await db.execute(
             select(SindasSyncLog.status, func.count(SindasSyncLog.id))
-            .where(func.date(SindasSyncLog.processed_at) == today)
+            .where(
+                func.date(SindasSyncLog.processed_at) == today,
+                SindasSyncLog.sekolah_id == sekolah_id
+            )
             .group_by(SindasSyncLog.status)
         )
         counts: dict[str, int] = {row[0]: row[1] for row in rows}
 
-        # Sync terakhir yang berhasil
+        # Sync terakhir yang berhasil untuk sekolah ini
         last_success = await db.execute(
             select(SindasSyncLog)
-            .where(SindasSyncLog.status == SindasSyncStatus.SUCCESS)
+            .where(
+                SindasSyncLog.status == SindasSyncStatus.SUCCESS,
+                SindasSyncLog.sekolah_id == sekolah_id
+            )
             .order_by(SindasSyncLog.processed_at.desc())
             .limit(1)
         )
         last_log: Optional[SindasSyncLog] = last_success.scalar_one_or_none()
 
-        # Total sepanjang waktu
-        total_row = await db.execute(select(func.count(SindasSyncLog.id)))
+        # Total sepanjang waktu untuk sekolah ini
+        total_row = await db.execute(
+            select(func.count(SindasSyncLog.id))
+            .where(SindasSyncLog.sekolah_id == sekolah_id)
+        )
         total_all_time = total_row.scalar_one()
 
         return SindasSyncStatusResponse(
             sindas_enabled=settings.SINDAS_ENABLED,
-            sindas_api_configured=bool(settings.SINDAS_API_BASE_URL and settings.SINDAS_API_KEY),
+            sindas_api_configured=bool(sekolah and sekolah.sindas_api_url and sekolah.sindas_api_key),
             today_total=sum(counts.values()),
             today_success=counts.get(SindasSyncStatus.SUCCESS, 0),
             today_failed=counts.get(SindasSyncStatus.FAILED, 0),

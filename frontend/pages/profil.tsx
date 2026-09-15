@@ -2,7 +2,7 @@
  * pages/profil.tsx — Halaman profil siswa
  * Mengikuti spesifikasi [TYPOGRAPHY], [COLORS], [SPACING_SHADOW] dari DESIGN.md
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Head from "next/head";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
@@ -83,7 +83,7 @@ function InfoRow({ icon: Icon, label, value }: { icon: React.ElementType; label:
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function ProfilPage() {
-  const { isAuthenticated } = useRequireAuth();
+  const { isAuthenticated, mounted } = useRequireAuth();
   const { siswa, updateSiswa } = useAuthStore();
   const queryClient = useQueryClient();
 
@@ -112,6 +112,15 @@ export default function ProfilPage() {
       telepon: siswa?.telepon || "",
     },
   });
+
+  useEffect(() => {
+    if (profileData) {
+      profilForm.reset({
+        email: profileData.email || "",
+        telepon: profileData.telepon || "",
+      });
+    }
+  }, [profileData]);
 
   // Form Password
   const passForm = useForm<GantiPasswordForm>({
@@ -142,7 +151,7 @@ export default function ProfilPage() {
     },
   });
 
-  if (!isAuthenticated) return null;
+  if (!mounted || !isAuthenticated) return null;
 
   const profil = profileData || siswa;
   const riwayat: any[] = riwayatData?.items || [];
@@ -228,9 +237,27 @@ export default function ProfilPage() {
                       <InfoRow icon={HashtagIcon} label="NIS" value={profil?.nis || "—"} />
                       <InfoRow icon={HashtagIcon} label="NISN" value={(profil as any)?.nisn || "—"} />
                       <InfoRow icon={UserIcon} label="Nama Lengkap" value={profil?.nama_lengkap || "—"} />
-                      <InfoRow icon={CalendarIcon} label="Tanggal Lahir" value={(profil as any)?.tgl_lahir ? format(new Date((profil as any).tgl_lahir), "d MMMM yyyy", { locale: localeId }) : "—"} />
-                      <InfoRow icon={AcademicCapIcon} label="Kelas" value={profil?.kelas || "—"} />
-                      <InfoRow icon={CalendarIcon} label="Angkatan" value={profil?.angkatan?.toString() || "—"} />
+                      <InfoRow 
+                        icon={CalendarIcon} 
+                        label="Tempat, Tanggal Lahir" 
+                        value={
+                          [
+                            (profil as any)?.tempat_lahir,
+                            (profil as any)?.tgl_lahir ? format(new Date((profil as any).tgl_lahir), "d MMMM yyyy", { locale: localeId }) : null
+                          ].filter(Boolean).join(", ") || "—"
+                        } 
+                      />
+                      <InfoRow 
+                        icon={UserIcon} 
+                        label="Jenis Kelamin" 
+                        value={(profil as any)?.jenis_kelamin === "L" ? "Laki-laki" : (profil as any)?.jenis_kelamin === "P" ? "Perempuan" : "—"} 
+                      />
+                      <InfoRow icon={AcademicCapIcon} label="Agama" value={(profil as any)?.agama || "—"} />
+                      <InfoRow icon={AcademicCapIcon} label="Kelas & Jurusan" value={[profil?.kelas, (profil as any)?.jurusan].filter(Boolean).join(" - ") || "—"} />
+                      <InfoRow icon={CalendarIcon} label="Angkatan" value={profil?.angkatan ? `Angkatan ${profil.angkatan}` : "—"} />
+                      <InfoRow icon={CalendarIcon} label="Tahun Lulus" value={(profil as any)?.tahun_lulus ? `Tahun ${ (profil as any).tahun_lulus }` : "Belum Lulus"} />
+                      <InfoRow icon={UserIcon} label="Orang Tua / Wali" value={(profil as any)?.nama_ortu || "—"} />
+                      <InfoRow icon={PhoneIcon} label="Telepon Orang Tua" value={(profil as any)?.telepon_ortu || "—"} />
                     </div>
                   )}
                 </div>

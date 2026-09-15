@@ -45,7 +45,7 @@ interface Dokumen {
 }
 
 export default function DokumenPage() {
-  const { isAuthenticated } = useRequireAuth();
+  const { isAuthenticated, mounted } = useRequireAuth();
 
   const [search, setSearch] = useState("");
   const [filterJenis, setFilterJenis] = useState("");
@@ -53,6 +53,33 @@ export default function DokumenPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [previewDoc, setPreviewDoc] = useState<Dokumen | null>(null);
   const [downloadingId, setDownloadingId] = useState<number | null>(null);
+  const [previewUrl, setPreviewUrl] = useState("");
+
+  useEffect(() => {
+    if (!previewDoc) {
+      if (previewUrl) {
+        URL.revokeObjectURL(previewUrl);
+        setPreviewUrl("");
+      }
+      return;
+    }
+    
+    let isMounted = true;
+    const fetchPreview = async () => {
+      try {
+        const res = await dokumenApi.getPreviewBlob(previewDoc.id);
+        const url = URL.createObjectURL(res.data);
+        if (isMounted) setPreviewUrl(url);
+      } catch (err) {
+        toast.error("Gagal memuat preview dokumen");
+      }
+    };
+    fetchPreview();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [previewDoc]);
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ["dokumen-saya"],
@@ -162,35 +189,7 @@ export default function DokumenPage() {
     }
   };
 
-  if (!isAuthenticated) return null;
-
-  const [previewUrl, setPreviewUrl] = useState("");
-
-  useEffect(() => {
-    if (!previewDoc) {
-      if (previewUrl) {
-        URL.revokeObjectURL(previewUrl);
-        setPreviewUrl("");
-      }
-      return;
-    }
-    
-    let isMounted = true;
-    const fetchPreview = async () => {
-      try {
-        const res = await dokumenApi.getPreviewBlob(previewDoc.id);
-        const url = URL.createObjectURL(res.data);
-        if (isMounted) setPreviewUrl(url);
-      } catch (err) {
-        toast.error("Gagal memuat preview dokumen");
-      }
-    };
-    fetchPreview();
-    
-    return () => {
-      isMounted = false;
-    };
-  }, [previewDoc]);
+  if (!mounted || !isAuthenticated) return null;
 
   return (
     <>

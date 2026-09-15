@@ -32,9 +32,12 @@ class Category(Base):
     __tablename__ = "categories"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     color: Mapped[str] = mapped_column(String(7), default="#6366f1")  # hex color
+    sekolah_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("sekolah.id", ondelete="CASCADE"), nullable=True
+    )
     parent_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("categories.id"), nullable=True
     )

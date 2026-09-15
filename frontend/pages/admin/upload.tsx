@@ -34,7 +34,7 @@ export default function AdminUpload() {
   const [jenisDok, setJenisDok] = useState("");
   const [tahunAjaran, setTahunAjaran] = useState("");
   const [semester, setSemester] = useState("ganjil");
-  const [metadataStr, setMetadataStr] = useState('{"keterangan": "Raport Kelas X Semester Ganjil"}');
+  const [metadataStr, setMetadataStr] = useState("{}");
   const [file, setFile] = useState<File | null>(null);
 
   // State Massal
@@ -101,19 +101,22 @@ export default function AdminUpload() {
 
   const selectedStudentObj = siswaList.find((s: any) => s.id === selectedStudentId);
 
-  useEffect(() => {
-    if (selectedStudentObj && jenisDok && tahunAjaran) {
-      const metadata = {
-        jenis: jenisDok,
-        nama_siswa: selectedStudentObj.nama_lengkap,
-        nisn: selectedStudentObj.nisn || null,
-        tahun_ajaran: tahunAjaran,
-        semester: semester,
-        catatan: `Dokumen ${jenisDok} milik ${selectedStudentObj.nama_lengkap}`
-      };
-      setMetadataStr(JSON.stringify(metadata, null, 2));
+  const handleGenerateTemplate = () => {
+    if (!selectedStudentObj) {
+      toast.error("Pilih siswa terlebih dahulu untuk generate template metadata.");
+      return;
     }
-  }, [selectedStudentObj, jenisDok, tahunAjaran, semester]);
+    const template = {
+      jenis: jenisDok,
+      nama_siswa: selectedStudentObj.nama_lengkap,
+      nisn: selectedStudentObj.nisn || null,
+      tahun_ajaran: tahunAjaran,
+      semester: semester,
+      catatan: `Dokumen ${jenisDok} milik ${selectedStudentObj.nama_lengkap}`
+    };
+    setMetadataStr(JSON.stringify(template, null, 2));
+    toast.success("Template metadata berhasil dibuat!");
+  };
 
   const computeSHA256 = async (selectedFile: File): Promise<string> => {
     try {
@@ -144,6 +147,16 @@ export default function AdminUpload() {
     e.preventDefault();
     if (!selectedStudentId || !file || !jenisDok || !tahunAjaran) {
       toast.error("Harap lengkapi form.");
+      return;
+    }
+
+    // Validate that metadataStr is valid JSON if provided
+    try {
+      if (metadataStr.trim()) {
+        JSON.parse(metadataStr);
+      }
+    } catch (err) {
+      toast.error("Format JSON untuk Metadata Tambahan tidak valid! Harap cek kembali tanda kurung atau kutip.");
       return;
     }
 
@@ -496,7 +509,19 @@ export default function AdminUpload() {
 
                 {/* Metadata JSON */}
                 <div>
-                  <label className="block text-xs font-bold text-neutral-700 uppercase mb-2">Metadata Tambahan (JSON String)</label>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs font-bold text-neutral-700 uppercase">Metadata Tambahan (JSON String)</label>
+                    {selectedStudentObj && (
+                      <button
+                        type="button"
+                        onClick={handleGenerateTemplate}
+                        className="text-[10px] font-bold text-[#208C68] hover:text-[#14503C] hover:underline transition-all flex items-center gap-1 bg-white hover:bg-neutral-50 border border-[#D4DDD9] px-2 py-1 rounded-lg shadow-sm"
+                      >
+                        <ArrowPathIcon className="w-3.5 h-3.5" />
+                        Gunakan Template Otomatis
+                      </button>
+                    )}
+                  </div>
                   <textarea
                     required
                     rows={6}

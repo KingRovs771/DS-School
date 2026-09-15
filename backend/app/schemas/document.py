@@ -15,6 +15,7 @@ class CategoryBase(BaseModel):
     description: Optional[str] = None
     color: str = Field("#6366f1", pattern=r"^#[0-9a-fA-F]{6}$")
     parent_id: Optional[int] = None
+    sekolah_id: Optional[int] = None
 
 
 class CategoryCreate(CategoryBase):

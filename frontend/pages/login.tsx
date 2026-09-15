@@ -2,7 +2,7 @@
  * pages/login.tsx — Halaman login portal siswa
  * Mengikuti spesifikasi [LOGIN_PAGE] dari DESIGN.md
  */
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -35,6 +35,12 @@ export default function LoginPage() {
   const [resetEmail, setResetEmail] = useState("");
   const [resetLoading, setResetLoading] = useState(false);
   const [customError, setCustomError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (router.query.error === "inactive") {
+      setCustomError("Akun Anda dinonaktifkan atau tidak ditemukan. Silakan hubungi administrator.");
+    }
+  }, [router.query.error]);
 
   const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema),

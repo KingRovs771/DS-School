@@ -6,6 +6,9 @@ import threading
 import time
 from contextlib import asynccontextmanager
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -103,9 +106,23 @@ async def lifespan(app: FastAPI):
     if settings.ENABLE_ANOMALY_DETECTION:
         start_weekly_retraining_scheduler()
 
+    # ── APScheduler: Retention Policy Check (harian jam 01:00 WIB = 18:00 UTC) ──
+    from app.services.retention_scheduler import check_retention_policies
+    scheduler = AsyncIOScheduler(timezone="UTC")
+    scheduler.add_job(
+        check_retention_policies,
+        trigger=CronTrigger(hour=18, minute=0),   # 18:00 UTC = 01:00 WIB
+        id="check_retention_policies",
+        name="Daily Retention Policy Check",
+        replace_existing=True,
+    )
+    scheduler.start()
+    logger.info("✅ Retention scheduler terdaftar — berjalan setiap hari jam 01:00 WIB")
+
     yield
 
     # ── Shutdown ─────────────────────────────────────────────────────
+    scheduler.shutdown(wait=False)
     await engine.dispose()
     logger.info("👋 DMS Sekolah API shut down gracefully")
 

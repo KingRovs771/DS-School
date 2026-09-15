@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
 import Head from "next/head";
 import AdminLayout from "@/components/AdminLayout";
-import { BuildingOffice2Icon, MapPinIcon, PhoneIcon, GlobeAltIcon } from "@heroicons/react/24/outline";
+import { BuildingOffice2Icon, MapPinIcon, PhoneIcon, GlobeAltIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 import toast from "react-hot-toast";
 import { sekolahApi } from "@/lib/api";
+import { useRequireAdmin } from "@/hooks/useAdminAuth";
 
 interface SekolahData {
   id: number;
@@ -16,28 +17,140 @@ interface SekolahData {
   telepon: string | null;
   email: string | null;
   website: string | null;
+  kabupaten_id: string | null;
 }
 
 export default function BiodataSekolahPage() {
+  const { isAdminAuthenticated, mounted } = useRequireAdmin();
   const [sekolah, setSekolah] = useState<SekolahData | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState<Partial<SekolahData>>({});
 
+  // Wilayah API States
+  const [provinces, setProvinces] = useState<{ code: string; name: string }[]>([]);
+  const [regencies, setRegencies] = useState<{ code: string; name: string }[]>([]);
+  const [selectedProv, setSelectedProv] = useState("");
+  const [selectedRegency, setSelectedRegency] = useState("");
+
   useEffect(() => {
-    fetchSekolah();
-  }, []);
+    if (isAdminAuthenticated) {
+      fetchSekolah();
+    }
+  }, [isAdminAuthenticated]);
+
+  const fetchProvinces = async () => {
+    try {
+      const res = await fetch("/api/wilayah/provinces");
+      const data = await res.json();
+      return data.data || [];
+    } catch (error) {
+      console.error("Gagal memuat daftar provinsi", error);
+      return [];
+    }
+  };
 
   const fetchSekolah = async () => {
+    if (!isAdminAuthenticated) return;
     try {
       setLoading(true);
+      const provList = await fetchProvinces();
+      setProvinces(provList);
+
       const res = await sekolahApi.getBiodata();
-      setSekolah(res.data);
-      setFormData(res.data);
+      const schoolData = res.data;
+      setSekolah(schoolData);
+      setFormData(schoolData);
+
+      // Pre-select provinsi berdasarkan string nama
+      if (schoolData.provinsi) {
+        const matchedProv = provList.find(
+          (p: any) => p.name.toLowerCase() === schoolData.provinsi.toLowerCase()
+        );
+        if (matchedProv) {
+          setSelectedProv(matchedProv.code);
+
+          // Fetch kabupaten/kota untuk provinsi terpilih
+          try {
+            const regRes = await fetch(`/api/wilayah/regencies/${matchedProv.code}`);
+            const regData = await regRes.json();
+            const regList = regData.data || [];
+            setRegencies(regList);
+
+            // Pre-select kabupaten/kota
+            if (schoolData.kota) {
+              const matchedReg = regList.find(
+                (r: any) => r.name.toLowerCase() === schoolData.kota.toLowerCase()
+              );
+              if (matchedReg) {
+                setSelectedRegency(matchedReg.code);
+              }
+            }
+          } catch (e) {
+            console.error("Gagal memuat kabupaten", e);
+          }
+        }
+      }
     } catch (error: any) {
       toast.error(error.response?.data?.detail || "Gagal mengambil data sekolah");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleProvChange = async (provCode: string) => {
+    setSelectedProv(provCode);
+    setSelectedRegency("");
+    setRegencies([]);
+
+    const provName = provinces.find((p) => p.code === provCode)?.name || null;
+    setFormData((prev) => ({
+      ...prev,
+      provinsi: provName,
+      kota: null,
+      kabupaten_id: null,
+    }));
+
+    if (provCode) {
+      try {
+        const res = await fetch(`/api/wilayah/regencies/${provCode}`);
+        const data = await res.json();
+        setRegencies(data.data || []);
+      } catch (error) {
+        console.error("Gagal memuat daftar kabupaten/kota", error);
+      }
+    }
+  };
+
+  const handleRegencyChange = async (regencyCode: string) => {
+    setSelectedRegency(regencyCode);
+
+    const regencyName = regencies.find((r) => r.code === regencyCode)?.name || null;
+    const provName = provinces.find((p) => p.code === selectedProv)?.name || "";
+
+    if (regencyCode && provName && regencyName) {
+      try {
+        // Sync ke database lokal untuk mendapatkan UUID kabupaten_id
+        const syncRes = await sekolahApi.syncKabupaten({
+          provinsi: provName,
+          nama: regencyName,
+          kode_kemendagri: regencyCode,
+        });
+        setFormData((prev) => ({
+          ...prev,
+          kota: regencyName,
+          kabupaten_id: syncRes.data.id,
+        }));
+      } catch (err) {
+        console.error("Gagal sinkronisasi kabupaten", err);
+        toast.error("Gagal memproses pilihan kabupaten/kota");
+      }
+    } else {
+      setFormData((prev) => ({
+        ...prev,
+        kota: null,
+        kabupaten_id: null,
+      }));
     }
   };
 
@@ -49,14 +162,12 @@ export default function BiodataSekolahPage() {
     e.preventDefault();
     try {
       setSaving(true);
-      // Backend expects: nama, alamat, kota, provinsi, telepon, email, website
-      // NOTE: `kode` (NPSN) is generated/set securely in NeuralKeyGen, if we allow edit, it's risky for existing docs.
-      // But the endpoint only allows updating standard fields.
       const payload = {
         nama: formData.nama,
         alamat: formData.alamat,
         kota: formData.kota,
         provinsi: formData.provinsi,
+        kabupaten_id: formData.kabupaten_id,
         telepon: formData.telepon,
         email: formData.email,
         website: formData.website,
@@ -71,11 +182,13 @@ export default function BiodataSekolahPage() {
     }
   };
 
+  if (!mounted || !isAdminAuthenticated) return null;
+
   if (loading) {
     return (
       <AdminLayout title="Biodata Sekolah">
         <div className="flex justify-center p-20">
-          <div className="animate-spin w-8 h-8 border-4 border-[#3DB891] border-t-transparent rounded-full" />
+          <ArrowPathIcon className="animate-spin w-8 h-8 text-[#3DB891]" />
         </div>
       </AdminLayout>
     );
@@ -111,10 +224,10 @@ export default function BiodataSekolahPage() {
                 className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#3DB891] focus:ring-4 focus:ring-[#3DB891]/10 outline-none transition-all text-sm font-medium"
               />
             </div>
-            
+
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-2 flex items-center gap-2">
-                NPSN / Kode Sekolah 
+                NPSN / Kode Sekolah
                 <span className="bg-amber-100 text-amber-700 text-[10px] px-2 py-0.5 rounded-full lowercase tracking-normal">Immutable</span>
               </label>
               <input
@@ -140,26 +253,41 @@ export default function BiodataSekolahPage() {
               />
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">Kota / Kabupaten</label>
-              <input
-                type="text"
-                name="kota"
-                value={formData.kota || ""}
-                onChange={handleChange}
-                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#3DB891] focus:ring-4 focus:ring-[#3DB891]/10 outline-none transition-all text-sm font-medium"
-              />
-            </div>
-
+            {/* Dropdown Provinsi */}
             <div>
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">Provinsi</label>
-              <input
-                type="text"
-                name="provinsi"
-                value={formData.provinsi || ""}
-                onChange={handleChange}
-                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#3DB891] focus:ring-4 focus:ring-[#3DB891]/10 outline-none transition-all text-sm font-medium"
-              />
+              <select
+                value={selectedProv}
+                onChange={(e) => handleProvChange(e.target.value)}
+                required
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#3DB891] focus:ring-4 focus:ring-[#3DB891]/10 outline-none transition-all text-sm font-medium bg-white"
+              >
+                <option value="">-- Pilih Provinsi --</option>
+                {provinces.map((p) => (
+                  <option key={p.code} value={p.code}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Dropdown Kabupaten/Kota */}
+            <div>
+              <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-2">Kota / Kabupaten</label>
+              <select
+                value={selectedRegency}
+                onChange={(e) => handleRegencyChange(e.target.value)}
+                disabled={!selectedProv}
+                required
+                className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#3DB891] focus:ring-4 focus:ring-[#3DB891]/10 outline-none transition-all text-sm font-medium bg-white disabled:bg-gray-50 disabled:cursor-not-allowed"
+              >
+                <option value="">-- Pilih Kota/Kabupaten --</option>
+                {regencies.map((r) => (
+                  <option key={r.code} value={r.code}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
             </div>
 
             <div>
@@ -186,7 +314,7 @@ export default function BiodataSekolahPage() {
                 className="w-full px-4 py-2.5 rounded-xl border border-gray-200 focus:border-[#3DB891] focus:ring-4 focus:ring-[#3DB891]/10 outline-none transition-all text-sm font-medium"
               />
             </div>
-            
+
             <div className="md:col-span-2">
               <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                 <GlobeAltIcon className="w-4 h-4 text-gray-400" />

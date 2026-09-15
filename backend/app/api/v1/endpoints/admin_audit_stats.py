@@ -4,18 +4,20 @@ Admin Audit & Stats Endpoints — Audit Trail Logs & Dashboard Statistik
 Menyediakan REST API visualisasi dashboard admin dan penelusuran audit trail lengkap.
 """
 import structlog
-from typing import Optional
+from typing import Optional, Union
 from fastapi import APIRouter, Depends, status
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_admin
-from app.models.admin import Admin
+from app.models.admin import Admin, AdminRole
 from app.models.siswa import Siswa
 from app.models.dokumen import Dokumen
 from app.models.audit_log import AuditLog
 from app.schemas.sekolah_schemas import AuditLogResponse
+from app.models.wilayah import DinasAdmin
+from app.models.sekolah import Sekolah
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
@@ -28,7 +30,7 @@ async def get_audit_trail_logs(
     user_type: Optional[str] = None,
     action: Optional[str] = None,
     status: Optional[str] = None,
-    current_admin: Admin = Depends(get_current_admin),
+    current_admin: Union[Admin, DinasAdmin] = Depends(get_current_admin),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -38,6 +40,31 @@ async def get_audit_trail_logs(
     logger.info("🔍 Admin fetching audit trail logs", admin_id=current_admin.id)
     
     query = select(AuditLog)
+    
+    if isinstance(current_admin, DinasAdmin):
+        # Dinas Admin: only see logs of schools in their kabupaten
+        stmt_sekolah = select(Sekolah.id).where(Sekolah.kabupaten_id == current_admin.kabupaten_id)
+        res_sekolah = await db.execute(stmt_sekolah)
+        school_ids = [row[0] for row in res_sekolah.all()]
+        
+        if not school_ids:
+            return []
+            
+        query = query.outerjoin(Siswa, AuditLog.siswa_id == Siswa.id) \
+                     .outerjoin(Admin, AuditLog.user_id == Admin.id) \
+                     .where(
+                         (Siswa.sekolah_id.in_(school_ids)) | 
+                         (Admin.sekolah_id.in_(school_ids))
+                     )
+    elif current_admin.role != AdminRole.SUPER_ADMIN and current_admin.sekolah_id:
+        # School Admin: only see logs of their school
+        query = query.outerjoin(Siswa, AuditLog.siswa_id == Siswa.id) \
+                     .outerjoin(Admin, AuditLog.user_id == Admin.id) \
+                     .where(
+                         (Siswa.sekolah_id == current_admin.sekolah_id) | 
+                         (Admin.sekolah_id == current_admin.sekolah_id)
+                     )
+    
     if user_type:
         query = query.where(AuditLog.user_type == user_type)
     if action:
@@ -67,25 +94,38 @@ async def get_dashboard_statistics(
     """
     logger.info("📊 Admin fetching dashboard statistics", admin_id=current_admin.id)
     
-    # 1. Hitung total siswa
+    # 1. Hitung total sekolah
+    res_sekolah = await db.execute(select(func.count(Sekolah.id)))
+    total_sekolah = res_sekolah.scalar() or 0
+    
+    # 2. Hitung total siswa
     query_siswa = select(func.count(Siswa.id))
+    if current_admin.role != AdminRole.SUPER_ADMIN and current_admin.sekolah_id:
+        query_siswa = query_siswa.where(Siswa.sekolah_id == current_admin.sekolah_id)
     res_siswa = await db.execute(query_siswa)
     total_siswa = res_siswa.scalar() or 0
     
-    # 2. Hitung total dokumen
+    # 3. Hitung total dokumen
     query_docs = select(func.count(Dokumen.id))
+    if current_admin.role != AdminRole.SUPER_ADMIN and current_admin.sekolah_id:
+        query_docs = query_docs.join(Siswa).where(Siswa.sekolah_id == current_admin.sekolah_id)
     res_docs = await db.execute(query_docs)
     total_docs = res_docs.scalar() or 0
     
-    # 3. Hitung total audit log
+    # 4. Hitung total audit log
     query_audit = select(func.count(AuditLog.id))
+    if current_admin.role != AdminRole.SUPER_ADMIN and current_admin.sekolah_id:
+        query_audit = query_audit.outerjoin(Siswa, AuditLog.siswa_id == Siswa.id).outerjoin(Admin, AuditLog.user_id == Admin.id).where((Siswa.sekolah_id == current_admin.sekolah_id) | (Admin.sekolah_id == current_admin.sekolah_id))
     res_audit = await db.execute(query_audit)
     total_audit_logs = res_audit.scalar() or 0
     
     # 4. Distribusi dokumen per kategori (simulasi aggregasi SQL)
     # Get actual distribution
     dist_kategori = {}
-    query_dist = select(Dokumen.jenis_dok, func.count(Dokumen.id)).group_by(Dokumen.jenis_dok)
+    query_dist = select(Dokumen.jenis_dok, func.count(Dokumen.id))
+    if current_admin.role != AdminRole.SUPER_ADMIN and current_admin.sekolah_id:
+        query_dist = query_dist.join(Siswa).where(Siswa.sekolah_id == current_admin.sekolah_id)
+    query_dist = query_dist.group_by(Dokumen.jenis_dok)
     res_dist = await db.execute(query_dist)
     for row in res_dist.all():
         dist_kategori[row[0]] = row[1]
@@ -97,11 +137,15 @@ async def get_dashboard_statistics(
     # Hitung siswa baru bulan ini
     start_of_month = datetime.combine(date.today().replace(day=1), time.min)
     query_siswa_baru = select(func.count(Siswa.id)).where(Siswa.created_at >= start_of_month)
+    if current_admin.role != AdminRole.SUPER_ADMIN and current_admin.sekolah_id:
+        query_siswa_baru = query_siswa_baru.where(Siswa.sekolah_id == current_admin.sekolah_id)
     res_siswa_baru = await db.execute(query_siswa_baru)
     siswa_baru_bulan_ini = res_siswa_baru.scalar() or 0
     
     # Hitung dokumen baru bulan ini
     query_docs_baru = select(func.count(Dokumen.id)).where(Dokumen.created_at >= start_of_month)
+    if current_admin.role != AdminRole.SUPER_ADMIN and current_admin.sekolah_id:
+        query_docs_baru = query_docs_baru.join(Siswa).where(Siswa.sekolah_id == current_admin.sekolah_id)
     res_docs_baru = await db.execute(query_docs_baru)
     dokumen_baru_bulan_ini = res_docs_baru.scalar() or 0
 
@@ -110,12 +154,17 @@ async def get_dashboard_statistics(
         AuditLog.action == "dokumen_download",
         AuditLog.created_at >= today_start
     )
+    if current_admin.role != AdminRole.SUPER_ADMIN and current_admin.sekolah_id:
+        query_dl_today = query_dl_today.outerjoin(Siswa, AuditLog.siswa_id == Siswa.id).outerjoin(Admin, AuditLog.user_id == Admin.id).where((Siswa.sekolah_id == current_admin.sekolah_id) | (Admin.sekolah_id == current_admin.sekolah_id))
     res_dl_today = await db.execute(query_dl_today)
     download_hari_ini = res_dl_today.scalar() or 0
     
     # 7. Dokumen Terbaru
     from sqlalchemy.orm import joinedload
-    query_recent = select(Dokumen).options(joinedload(Dokumen.siswa)).order_by(Dokumen.created_at.desc()).limit(5)
+    query_recent = select(Dokumen).options(joinedload(Dokumen.siswa))
+    if current_admin.role != AdminRole.SUPER_ADMIN and current_admin.sekolah_id:
+        query_recent = query_recent.join(Siswa).where(Siswa.sekolah_id == current_admin.sekolah_id)
+    query_recent = query_recent.order_by(Dokumen.created_at.desc()).limit(5)
     res_recent = await db.execute(query_recent)
     recent_docs_models = res_recent.scalars().all()
     recent_documents = []
@@ -145,6 +194,8 @@ async def get_dashboard_statistics(
         AuditLog.action.in_(["dokumen_upload", "dokumen_download"]),
         AuditLog.created_at >= start_of_six_months
     )
+    if current_admin.role != AdminRole.SUPER_ADMIN and current_admin.sekolah_id:
+        query_chart = query_chart.outerjoin(Siswa, AuditLog.siswa_id == Siswa.id).outerjoin(Admin, AuditLog.user_id == Admin.id).where((Siswa.sekolah_id == current_admin.sekolah_id) | (Admin.sekolah_id == current_admin.sekolah_id))
     res_chart = await db.execute(query_chart)
     chart_logs = res_chart.all()
     
@@ -175,6 +226,7 @@ async def get_dashboard_statistics(
         "status": "success",
         "sekolah_id": current_admin.sekolah_id or 1,
         "summary": {
+            "total_sekolah": total_sekolah,
             "total_siswa": total_siswa,
             "total_dokumen_terenkripsi": total_docs,
             "total_audit_logs": total_audit_logs,

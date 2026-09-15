@@ -6,7 +6,7 @@ import Head from "next/head";
 import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { adminAuditStatsApi, adminAnomaliApi, adminDokumenApi } from "@/lib/api";
+import { adminAuditStatsApi, adminAnomaliApi, adminDokumenApi, superAdminApi } from "@/lib/api";
 import toast from "react-hot-toast";
 import PdfModal from "@/components/PdfModal";
 import AdminLayout from "@/components/AdminLayout";
@@ -23,7 +23,9 @@ import {
   UserPlusIcon,
   EyeIcon,
   ArrowUpIcon,
-  ArrowDownIcon
+  ArrowDownIcon,
+  BuildingOffice2Icon,
+  CloudArrowUpIcon,
 } from "@heroicons/react/24/solid";
 import { 
   ArrowUpTrayIcon as ArrowUpOutline,
@@ -31,7 +33,9 @@ import {
   ClipboardDocumentListIcon as ClipboardOutline,
   KeyIcon as KeyOutline,
   EyeIcon as EyeOutline,
-  ArrowDownTrayIcon as ArrowDownOutline
+  ArrowDownTrayIcon as ArrowDownOutline,
+  BuildingOffice2Icon as BuildingOffice2Outline,
+  CloudArrowUpIcon as CloudArrowUpOutline,
 } from "@heroicons/react/24/outline";
 import { formatBytes } from "@/lib/utils";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
@@ -50,6 +54,8 @@ const defaultChartData = [
 export default function AdminDashboard() {
   const { isAdminAuthenticated, mounted } = useRequireAdmin();
   const { admin } = useAdminAuthStore();
+
+  const isSuperAdmin = admin?.role === 'super_admin';
 
   const [previewDocId, setPreviewDocId] = useState<number | null>(null);
   const [previewUrl, setPreviewUrl] = useState("");
@@ -114,7 +120,20 @@ export default function AdminDashboard() {
     refetchInterval: 10000,
   });
 
+  // Query ambil data monitoring sekolah (hanya untuk super_admin)
+  const { data: schoolsData = [] } = useQuery({
+    queryKey: ["superadmin-monitoring-sekolah"],
+    queryFn: async () => {
+      if (!isSuperAdmin) return [];
+      const res = await superAdminApi.getMonitoringSekolah();
+      return res.data;
+    },
+    enabled: !!isSuperAdmin,
+    refetchInterval: 20000,
+  });
+
   const stats = statsData?.summary || {
+    total_sekolah: 0,
     total_siswa: 0,
     total_dokumen_terenkripsi: 0,
     total_audit_logs: 0,
@@ -131,10 +150,17 @@ export default function AdminDashboard() {
     return null;
   }
 
+  if (admin?.role === "dinas_pendidikan") {
+    if (typeof window !== "undefined") {
+      window.location.href = "/dinas/dashboard";
+    }
+    return null;
+  }
+
   return (
-    <AdminLayout title="Overview Analitik">
+    <AdminLayout title={isSuperAdmin ? "Overview Analitik Sistem (Super Admin)" : "Overview Analitik"}>
       <Head>
-        <title>Dashboard Admin — DokumenSekolah</title>
+        <title>{isSuperAdmin ? "Dashboard Super Admin — DokumenSekolah" : "Dashboard Admin — DokumenSekolah"}</title>
       </Head>
 
       <div className="space-y-6 font-body">
@@ -142,20 +168,35 @@ export default function AdminDashboard() {
         {/* ── [STAT_CARDS] ── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           
-          {/* Card 1: Total Dokumen */}
-          <div className="bg-[#DFF2EC] border border-black/5 rounded-[20px] p-5 shadow-sm hover:translate-y-[-2px] hover:shadow-md transition-all duration-200">
-            <div className="flex justify-between items-start mb-4">
-              <span className="text-[13px] font-semibold text-[#0F4C39]/70 uppercase tracking-wider">Total Dokumen</span>
-              <div className="w-9 h-9 rounded-xl bg-black/5 flex items-center justify-center">
-                <DocumentTextIcon className="w-5 h-5 text-[#1A7A5E]" />
+          {/* Card 1: Total Sekolah / Total Dokumen */}
+          {isSuperAdmin ? (
+            <div className="bg-[#DFF2EC] border border-black/5 rounded-[20px] p-5 shadow-sm hover:translate-y-[-2px] hover:shadow-md transition-all duration-200">
+              <div className="flex justify-between items-start mb-4">
+                <span className="text-[13px] font-semibold text-[#0F4C39]/70 uppercase tracking-wider">Total Sekolah Binaan</span>
+                <div className="w-9 h-9 rounded-xl bg-black/5 flex items-center justify-center">
+                  <BuildingOffice2Icon className="w-5 h-5 text-[#1A7A5E]" />
+                </div>
+              </div>
+              <h3 className="text-3xl font-display font-extrabold text-[#0F4C39] leading-none mb-2">{stats.total_sekolah}</h3>
+              <div className="flex items-center gap-1 text-[#0F4C39]/65 text-xs font-semibold">
+                <span>Sekolah terdaftar di sistem</span>
               </div>
             </div>
-            <h3 className="text-3xl font-display font-extrabold text-[#0F4C39] leading-none mb-2">{stats.total_dokumen_terenkripsi}</h3>
-            <div className="flex items-center gap-1 text-[#0F4C39]/65 text-xs font-semibold">
-              <ArrowUpIcon className="w-3.5 h-3.5 text-[#15803D]" />
-              <span>+{stats.dokumen_baru_bulan_ini} bulan ini</span>
+          ) : (
+            <div className="bg-[#DFF2EC] border border-black/5 rounded-[20px] p-5 shadow-sm hover:translate-y-[-2px] hover:shadow-md transition-all duration-200">
+              <div className="flex justify-between items-start mb-4">
+                <span className="text-[13px] font-semibold text-[#0F4C39]/70 uppercase tracking-wider">Total Dokumen</span>
+                <div className="w-9 h-9 rounded-xl bg-black/5 flex items-center justify-center">
+                  <DocumentTextIcon className="w-5 h-5 text-[#1A7A5E]" />
+                </div>
+              </div>
+              <h3 className="text-3xl font-display font-extrabold text-[#0F4C39] leading-none mb-2">{stats.total_dokumen_terenkripsi}</h3>
+              <div className="flex items-center gap-1 text-[#0F4C39]/65 text-xs font-semibold">
+                <ArrowUpIcon className="w-3.5 h-3.5 text-[#15803D]" />
+                <span>+{stats.dokumen_baru_bulan_ini} bulan ini</span>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Card 2: Total Siswa */}
           <div className="bg-[#DDE9F8] border border-black/5 rounded-[20px] p-5 shadow-sm hover:translate-y-[-2px] hover:shadow-md transition-all duration-200">
@@ -172,39 +213,72 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* Card 3: Download Hari Ini */}
-          <div className="bg-[#EDE0F8] border border-black/5 rounded-[20px] p-5 shadow-sm hover:translate-y-[-2px] hover:shadow-md transition-all duration-200">
-            <div className="flex justify-between items-start mb-4">
-              <span className="text-[13px] font-semibold text-[#4A1D7A]/70 uppercase tracking-wider">Download Hari Ini</span>
-              <div className="w-9 h-9 rounded-xl bg-black/5 flex items-center justify-center">
-                <ArrowDownTrayIcon className="w-5 h-5 text-[#7C3AED]" />
+          {/* Card 3: Total Dokumen (jika super_admin) / Download Hari Ini */}
+          {isSuperAdmin ? (
+            <div className="bg-[#EDE0F8] border border-black/5 rounded-[20px] p-5 shadow-sm hover:translate-y-[-2px] hover:shadow-md transition-all duration-200">
+              <div className="flex justify-between items-start mb-4">
+                <span className="text-[13px] font-semibold text-[#4A1D7A]/70 uppercase tracking-wider">Total Dokumen Sistem</span>
+                <div className="w-9 h-9 rounded-xl bg-black/5 flex items-center justify-center">
+                  <DocumentTextIcon className="w-5 h-5 text-[#7C3AED]" />
+                </div>
+              </div>
+              <h3 className="text-3xl font-display font-extrabold text-[#4A1D7A] leading-none mb-2">{stats.total_dokumen_terenkripsi}</h3>
+              <div className="flex items-center gap-1 text-[#4A1D7A]/65 text-xs font-semibold">
+                <ArrowUpIcon className="w-3.5 h-3.5 text-[#15803D]" />
+                <span>+{stats.dokumen_baru_bulan_ini} bulan ini</span>
               </div>
             </div>
-            <h3 className="text-3xl font-display font-extrabold text-[#4A1D7A] leading-none mb-2">{stats.download_hari_ini}</h3>
-            <div className="flex items-center gap-1 text-[#4A1D7A]/65 text-xs font-semibold">
-              <ArrowUpIcon className="w-3.5 h-3.5 text-[#15803D]" />
-              <span>Hari ini</span>
+          ) : (
+            <div className="bg-[#EDE0F8] border border-black/5 rounded-[20px] p-5 shadow-sm hover:translate-y-[-2px] hover:shadow-md transition-all duration-200">
+              <div className="flex justify-between items-start mb-4">
+                <span className="text-[13px] font-semibold text-[#4A1D7A]/70 uppercase tracking-wider">Download Hari Ini</span>
+                <div className="w-9 h-9 rounded-xl bg-black/5 flex items-center justify-center">
+                  <ArrowDownTrayIcon className="w-5 h-5 text-[#7C3AED]" />
+                </div>
+              </div>
+              <h3 className="text-3xl font-display font-extrabold text-[#4A1D7A] leading-none mb-2">{stats.download_hari_ini}</h3>
+              <div className="flex items-center gap-1 text-[#4A1D7A]/65 text-xs font-semibold">
+                <ArrowUpIcon className="w-3.5 h-3.5 text-[#15803D]" />
+                <span>Hari ini</span>
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Card 4: Anomali Aktif */}
-          <div className={clsx(
-            "border border-black/5 rounded-[20px] p-5 shadow-sm hover:translate-y-[-2px] hover:shadow-md transition-all duration-200",
-            realAlertsData.length > 0 ? "bg-[#FDE8D8] animate-pulse-dot" : "bg-[#E0F0E0]"
-          )}>
-            <div className="flex justify-between items-start mb-4">
-              <span className="text-[13px] font-semibold uppercase tracking-wider text-neutral-800">Anomali Aktif</span>
-              <div className="w-9 h-9 rounded-xl bg-black/5 flex items-center justify-center">
-                <ExclamationTriangleIcon className={clsx("w-5 h-5", realAlertsData.length > 0 ? "text-[#C2410C]" : "text-[#15803D]")} />
+          {/* Card 4: Total Storage (jika super_admin) / Anomali Aktif */}
+          {isSuperAdmin ? (
+            <div className="bg-[#E0F0E0] border border-black/5 rounded-[20px] p-5 shadow-sm hover:translate-y-[-2px] hover:shadow-md transition-all duration-200">
+              <div className="flex justify-between items-start mb-4">
+                <span className="text-[13px] font-semibold text-neutral-800 uppercase tracking-wider">Storage Terpakai</span>
+                <div className="w-9 h-9 rounded-xl bg-black/5 flex items-center justify-center">
+                  <ClipboardDocumentListIcon className="w-5 h-5 text-[#15803D]" />
+                </div>
               </div>
+              <h3 className="text-3xl font-display font-extrabold text-neutral-900 leading-none mb-2">
+                {formatBytes(stats.storage_used_bytes)}
+              </h3>
+              <span className="text-xs font-semibold text-neutral-500">
+                Estimasi enkripsi awan
+              </span>
             </div>
-            <h3 className={clsx("text-3xl font-display font-extrabold leading-none mb-2", realAlertsData.length > 0 ? "text-[#7A2D0F]" : "text-[#14532D]")}>
-              {realAlertsData.length}
-            </h3>
-            <span className={clsx("text-xs font-semibold", realAlertsData.length > 0 ? "text-[#7A2D0F]/70" : "text-[#14532D]/75")}>
-              {realAlertsData.length > 0 ? "Perlu perhatian segera" : "Sistem Aman ✓"}
-            </span>
-          </div>
+          ) : (
+            <div className={clsx(
+              "border border-black/5 rounded-[20px] p-5 shadow-sm hover:translate-y-[-2px] hover:shadow-md transition-all duration-200",
+              realAlertsData.length > 0 ? "bg-[#FDE8D8] animate-pulse-dot" : "bg-[#E0F0E0]"
+            )}>
+              <div className="flex justify-between items-start mb-4">
+                <span className="text-[13px] font-semibold uppercase tracking-wider text-neutral-800">Anomali Aktif</span>
+                <div className="w-9 h-9 rounded-xl bg-black/5 flex items-center justify-center">
+                  <ExclamationTriangleIcon className={clsx("w-5 h-5", realAlertsData.length > 0 ? "text-[#C2410C]" : "text-[#15803D]")} />
+                </div>
+              </div>
+              <h3 className={clsx("text-3xl font-display font-extrabold leading-none mb-2", realAlertsData.length > 0 ? "text-[#7A2D0F]" : "text-[#14532D]")}>
+                {realAlertsData.length}
+              </h3>
+              <span className={clsx("text-xs font-semibold", realAlertsData.length > 0 ? "text-[#7A2D0F]/70" : "text-[#14532D]/75")}>
+                {realAlertsData.length > 0 ? "Perlu perhatian segera" : "Sistem Aman ✓"}
+              </span>
+            </div>
+          )}
 
         </div>
 
@@ -221,7 +295,9 @@ export default function AdminDashboard() {
                   <div className="w-[34px] h-[34px] bg-[#E0F5EE] rounded-xl flex items-center justify-center">
                     <ClipboardDocumentListIcon className="w-[18px] h-[18px] text-[#14503C]" />
                   </div>
-                  <h3 className="font-display font-bold text-neutral-950 text-sm">Upload & Akses per Bulan</h3>
+                  <h3 className="font-display font-bold text-neutral-950 text-sm">
+                    {isSuperAdmin ? "Aktivitas Upload & Akses Sistem per Bulan" : "Upload & Akses per Bulan"}
+                  </h3>
                 </div>
                 <span className="text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-600 px-3 py-1 rounded-lg cursor-pointer font-semibold transition-colors">
                   Filter: 6 bln ▼
@@ -243,77 +319,130 @@ export default function AdminDashboard() {
             </div>
 
             {/* Table Section */}
-            <div className="bg-white border border-neutral-200 rounded-[20px] p-5 shadow-sm">
-              <div className="flex items-center justify-between mb-4 border-b border-neutral-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-[34px] h-[34px] bg-[#E0F5EE] rounded-xl flex items-center justify-center">
-                    <DocumentTextIcon className="w-[18px] h-[18px] text-[#14503C]" />
+            {isSuperAdmin ? (
+              <div className="bg-white border border-neutral-200 rounded-[20px] p-5 shadow-sm">
+                <div className="flex items-center justify-between mb-4 border-b border-neutral-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-[34px] h-[34px] bg-[#E0F5EE] rounded-xl flex items-center justify-center">
+                      <BuildingOffice2Icon className="w-[18px] h-[18px] text-[#14503C]" />
+                    </div>
+                    <h3 className="font-display font-bold text-neutral-950 text-sm">Utilisasi Sekolah Terdaftar</h3>
                   </div>
-                  <h3 className="font-display font-bold text-neutral-950 text-sm">Dokumen Terbaru</h3>
+                  <Link href="/admin/monitoring" className="text-xs font-semibold text-[#208C68] hover:text-[#14503C] transition-colors">
+                    Detail monitoring →
+                  </Link>
                 </div>
-                <Link href="/admin/siswa" className="text-xs font-semibold text-[#208C68] hover:text-[#14503C] transition-colors">
-                  Lihat semua →
-                </Link>
-              </div>
 
-              {/* [TABLE_COMPONENT] */}
-              <div className="w-full overflow-hidden border border-neutral-200 rounded-xl">
-                <table className="w-full border-collapse">
-                  <thead>
-                    <tr className="bg-neutral-50 border-b border-neutral-200">
-                      <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-left">Jenis</th>
-                      <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-left">Siswa</th>
-                      <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-left">Angkatan</th>
-                      <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-left">Tgl Unggah</th>
-                      <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-right">Aksi</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentDocs.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="text-center py-8 text-xs text-neutral-400 font-medium">Tidak ada dokumen terbaru</td>
+                <div className="w-full overflow-hidden border border-neutral-200 rounded-xl">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="bg-neutral-50 border-b border-neutral-200">
+                        <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-left">Nama Sekolah</th>
+                        <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-left">NPSN</th>
+                        <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-left">Total Siswa</th>
+                        <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-left">Total Dokumen</th>
+                        <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-right">Status</th>
                       </tr>
-                    ) : (
-                      recentDocs.slice(0, 5).map((doc: any) => {
-                        const typeLabel = doc.document_type || "Dokumen";
-                        const isRapor = typeLabel.toLowerCase().includes("rapor");
-                        const isIjazah = typeLabel.toLowerCase().includes("ijazah");
-                        const isTranskrip = typeLabel.toLowerCase().includes("transkrip");
-
-                        return (
-                          <tr key={doc.id} className="border-b border-neutral-100 hover:bg-[#F0FAF6] transition-colors duration-120 last:border-none">
-                            <td className="px-4 py-3 whitespace-nowrap">
+                    </thead>
+                    <tbody>
+                      {schoolsData.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="text-center py-8 text-xs text-neutral-400 font-medium">Tidak ada sekolah terdaftar</td>
+                        </tr>
+                      ) : (
+                        schoolsData.slice(0, 5).map((sch: any) => (
+                          <tr key={sch.id} className="border-b border-neutral-100 hover:bg-[#F0FAF6] transition-colors duration-120 last:border-none">
+                            <td className="px-4 py-3 text-sm text-neutral-800 font-bold">{sch.nama}</td>
+                            <td className="px-4 py-3 text-sm text-neutral-500 font-mono font-medium">{sch.npsn}</td>
+                            <td className="px-4 py-3 text-sm text-neutral-700 font-semibold">{sch.total_siswa}</td>
+                            <td className="px-4 py-3 text-sm text-neutral-700 font-semibold">{sch.total_dokumen}</td>
+                            <td className="px-4 py-3 text-right">
                               <span className={clsx(
-                                "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-bold leading-normal",
-                                isRapor && "bg-[#DFF2EC] text-[#0F4C39]",
-                                isIjazah && "bg-[#FCEEDD] text-[#78350F]",
-                                isTranskrip && "bg-[#EDE0F8] text-[#4A1D7A]",
-                                !isRapor && !isIjazah && !isTranskrip && "bg-[#DDE9F8] text-[#1A3D6B]"
+                                "inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold",
+                                sch.is_active ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
                               )}>
-                                📄 {typeLabel}
+                                {sch.is_active ? "Aktif" : "Nonaktif"}
                               </span>
                             </td>
-                            <td className="px-4 py-3 text-sm text-neutral-800 font-semibold">{doc.siswa?.nama_lengkap || "Siswa"}</td>
-                            <td className="px-4 py-3 text-sm text-neutral-600 font-medium font-mono">{doc.siswa?.angkatan || "—"}</td>
-                            <td className="px-4 py-3 text-xs text-neutral-400 font-semibold">{new Date(doc.created_at).toLocaleDateString("id-ID", { day: "numeric", month: "short" })}</td>
-                            <td className="px-4 py-3 text-right">
-                              <div className="flex justify-end gap-1.5">
-                                <button onClick={() => setPreviewDocId(doc.id)} className="w-[30px] h-[30px] bg-[#E0F5EE] hover:bg-[#B8EAD9] rounded-lg flex items-center justify-center text-[#14503C] transition-colors shadow-sm">
-                                  <EyeOutline className="w-4 h-4" />
-                                </button>
-                                <button onClick={() => handleDownloadDoc(doc)} className="w-[30px] h-[30px] bg-[#EDE0F8] hover:bg-purple-200 rounded-lg flex items-center justify-center text-[#4A1D7A] transition-colors shadow-sm">
-                                  <ArrowDownOutline className="w-4 h-4" />
-                                </button>
-                              </div>
-                            </td>
                           </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div className="bg-white border border-neutral-200 rounded-[20px] p-5 shadow-sm">
+                <div className="flex items-center justify-between mb-4 border-b border-neutral-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-[34px] h-[34px] bg-[#E0F5EE] rounded-xl flex items-center justify-center">
+                      <DocumentTextIcon className="w-[18px] h-[18px] text-[#14503C]" />
+                    </div>
+                    <h3 className="font-display font-bold text-neutral-950 text-sm">Dokumen Terbaru</h3>
+                  </div>
+                  <Link href="/admin/siswa" className="text-xs font-semibold text-[#208C68] hover:text-[#14503C] transition-colors">
+                    Lihat semua →
+                  </Link>
+                </div>
+
+                <div className="w-full overflow-hidden border border-neutral-200 rounded-xl">
+                  <table className="w-full border-collapse">
+                    <thead>
+                      <tr className="bg-neutral-50 border-b border-neutral-200">
+                        <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-left">Jenis</th>
+                        <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-left">Siswa</th>
+                        <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-left">Angkatan</th>
+                        <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-left">Tgl Unggah</th>
+                        <th className="text-[11px] font-bold uppercase tracking-wider text-neutral-400 px-4 py-2.5 text-right">Aksi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentDocs.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} className="text-center py-8 text-xs text-neutral-400 font-medium">Tidak ada dokumen terbaru</td>
+                        </tr>
+                      ) : (
+                        recentDocs.slice(0, 5).map((doc: any) => {
+                          const typeLabel = doc.document_type || "Dokumen";
+                          const isRapor = typeLabel.toLowerCase().includes("rapor");
+                          const isIjazah = typeLabel.toLowerCase().includes("ijazah");
+                          const isTranskrip = typeLabel.toLowerCase().includes("transkrip");
+
+                          return (
+                            <tr key={doc.id} className="border-b border-neutral-100 hover:bg-[#F0FAF6] transition-colors duration-120 last:border-none">
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                <span className={clsx(
+                                  "inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[11px] font-bold leading-normal",
+                                  isRapor && "bg-[#DFF2EC] text-[#0F4C39]",
+                                  isIjazah && "bg-[#FCEEDD] text-[#78350F]",
+                                  isTranskrip && "bg-[#EDE0F8] text-[#4A1D7A]",
+                                  !isRapor && !isIjazah && !isTranskrip && "bg-[#DDE9F8] text-[#1A3D6B]"
+                                )}>
+                                  📄 {typeLabel}
+                                </span>
+                              </td>
+                              <td className="px-4 py-3 text-sm text-neutral-800 font-semibold">{doc.siswa?.nama_lengkap || "Siswa"}</td>
+                              <td className="px-4 py-3 text-sm text-neutral-600 font-medium font-mono">{doc.siswa?.angkatan || "—"}</td>
+                              <td className="px-4 py-3 text-xs text-neutral-400 font-semibold">{new Date(doc.created_at).toLocaleDateString("id-ID", { day: "numeric", month: "short" })}</td>
+                              <td className="px-4 py-3 text-right">
+                                <div className="flex justify-end gap-1.5">
+                                  <button onClick={() => setPreviewDocId(doc.id)} className="w-[30px] h-[30px] bg-[#E0F5EE] hover:bg-[#B8EAD9] rounded-lg flex items-center justify-center text-[#14503C] transition-colors shadow-sm">
+                                    <EyeOutline className="w-4 h-4" />
+                                  </button>
+                                  <button onClick={() => handleDownloadDoc(doc)} className="w-[30px] h-[30px] bg-[#EDE0F8] hover:bg-purple-200 rounded-lg flex items-center justify-center text-[#4A1D7A] transition-colors shadow-sm">
+                                    <ArrowDownOutline className="w-4 h-4" />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
           </div>
 
@@ -323,7 +452,9 @@ export default function AdminDashboard() {
             {/* [ACTIVITY_FEED] */}
             <div className="bg-white border border-neutral-200 rounded-[20px] p-5 shadow-sm">
               <div className="flex items-center justify-between mb-4 border-b border-neutral-100 pb-3">
-                <h3 className="font-display font-bold text-neutral-950 text-sm">Aktivitas Terbaru</h3>
+                <h3 className="font-display font-bold text-neutral-950 text-sm">
+                  {isSuperAdmin ? "Anomali Sistem Terbaru" : "Aktivitas Terbaru"}
+                </h3>
                 <span className="text-[10px] font-extrabold bg-[#FDE8D8] text-[#C2410C] px-2 py-0.5 rounded-full uppercase tracking-wider animate-pulse-dot">Live</span>
               </div>
               
@@ -365,33 +496,67 @@ export default function AdminDashboard() {
               </div>
               <div className="grid grid-cols-2 gap-2.5">
                 
-                <Link href="/admin/upload" className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-[#D4DDD9] rounded-xl cursor-pointer hover:border-[#3DB891] hover:bg-[#F0FAF6] transition-all hover:translate-y-[-1px] hover:shadow-sm">
-                  <div className="w-10 h-10 bg-[#FCEEDD] rounded-xl flex items-center justify-center">
-                    <ArrowUpOutline className="w-5 h-5 text-[#D97706]" />
-                  </div>
-                  <span className="text-xs font-bold text-neutral-700 text-center leading-tight">Upload Dok</span>
-                </Link>
+                {isSuperAdmin ? (
+                  <>
+                    <Link href="/admin/manajemen-sekolah" className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-[#D4DDD9] rounded-xl cursor-pointer hover:border-[#3DB891] hover:bg-[#F0FAF6] transition-all hover:translate-y-[-1px] hover:shadow-sm">
+                      <div className="w-10 h-10 bg-[#FCEEDD] rounded-xl flex items-center justify-center">
+                        <BuildingOffice2Outline className="w-5 h-5 text-[#D97706]" />
+                      </div>
+                      <span className="text-xs font-bold text-neutral-700 text-center leading-tight">Kelola Sekolah</span>
+                    </Link>
 
-                <Link href="/admin/siswa" className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-[#D4DDD9] rounded-xl cursor-pointer hover:border-[#3DB891] hover:bg-[#F0FAF6] transition-all hover:translate-y-[-1px] hover:shadow-sm">
-                  <div className="w-10 h-10 bg-[#DDE9F8] rounded-xl flex items-center justify-center">
-                    <UserPlusOutline className="w-5 h-5 text-[#2563EB]" />
-                  </div>
-                  <span className="text-xs font-bold text-neutral-700 text-center leading-tight">Siswa Baru</span>
-                </Link>
+                    <Link href="/admin/manajemen-dinas" className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-[#D4DDD9] rounded-xl cursor-pointer hover:border-[#3DB891] hover:bg-[#F0FAF6] transition-all hover:translate-y-[-1px] hover:shadow-sm">
+                      <div className="w-10 h-10 bg-[#DDE9F8] rounded-xl flex items-center justify-center">
+                        <BuildingOffice2Outline className="w-5 h-5 text-[#2563EB]" />
+                      </div>
+                      <span className="text-xs font-bold text-neutral-700 text-center leading-tight">Kelola Dinas</span>
+                    </Link>
 
-                <Link href="/admin/audit-log" className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-[#D4DDD9] rounded-xl cursor-pointer hover:border-[#3DB891] hover:bg-[#F0FAF6] transition-all hover:translate-y-[-1px] hover:shadow-sm">
-                  <div className="w-10 h-10 bg-[#DFF2EC] rounded-xl flex items-center justify-center">
-                    <ClipboardOutline className="w-5 h-5 text-[#1A7A5E]" />
-                  </div>
-                  <span className="text-xs font-bold text-neutral-700 text-center leading-tight">Audit Log</span>
-                </Link>
+                    <Link href="/admin/backup" className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-[#D4DDD9] rounded-xl cursor-pointer hover:border-[#3DB891] hover:bg-[#F0FAF6] transition-all hover:translate-y-[-1px] hover:shadow-sm">
+                      <div className="w-10 h-10 bg-[#EDE0F8] rounded-xl flex items-center justify-center">
+                        <CloudArrowUpOutline className="w-5 h-5 text-[#7C3AED]" />
+                      </div>
+                      <span className="text-xs font-bold text-neutral-700 text-center leading-tight">Backup Sistem</span>
+                    </Link>
 
-                <Link href="/admin/master-key" className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-[#D4DDD9] rounded-xl cursor-pointer hover:border-[#3DB891] hover:bg-[#F0FAF6] transition-all hover:translate-y-[-1px] hover:shadow-sm">
-                  <div className="w-10 h-10 bg-[#E0F0E0] rounded-xl flex items-center justify-center">
-                    <KeyOutline className="w-5 h-5 text-[#15803D]" />
-                  </div>
-                  <span className="text-xs font-bold text-neutral-700 text-center leading-tight">Master Key</span>
-                </Link>
+                    <Link href="/admin/master-key" className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-[#D4DDD9] rounded-xl cursor-pointer hover:border-[#3DB891] hover:bg-[#F0FAF6] transition-all hover:translate-y-[-1px] hover:shadow-sm">
+                      <div className="w-10 h-10 bg-[#E0F0E0] rounded-xl flex items-center justify-center">
+                        <KeyOutline className="w-5 h-5 text-[#15803D]" />
+                      </div>
+                      <span className="text-xs font-bold text-neutral-700 text-center leading-tight">Master Keys</span>
+                    </Link>
+                  </>
+                ) : (
+                  <>
+                    <Link href="/admin/upload" className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-[#D4DDD9] rounded-xl cursor-pointer hover:border-[#3DB891] hover:bg-[#F0FAF6] transition-all hover:translate-y-[-1px] hover:shadow-sm">
+                      <div className="w-10 h-10 bg-[#FCEEDD] rounded-xl flex items-center justify-center">
+                        <ArrowUpOutline className="w-5 h-5 text-[#D97706]" />
+                      </div>
+                      <span className="text-xs font-bold text-neutral-700 text-center leading-tight">Upload Dok</span>
+                    </Link>
+
+                    <Link href="/admin/siswa" className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-[#D4DDD9] rounded-xl cursor-pointer hover:border-[#3DB891] hover:bg-[#F0FAF6] transition-all hover:translate-y-[-1px] hover:shadow-sm">
+                      <div className="w-10 h-10 bg-[#DDE9F8] rounded-xl flex items-center justify-center">
+                        <UserPlusOutline className="w-5 h-5 text-[#2563EB]" />
+                      </div>
+                      <span className="text-xs font-bold text-neutral-700 text-center leading-tight">Siswa Baru</span>
+                    </Link>
+
+                    <Link href="/admin/audit-log" className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-[#D4DDD9] rounded-xl cursor-pointer hover:border-[#3DB891] hover:bg-[#F0FAF6] transition-all hover:translate-y-[-1px] hover:shadow-sm">
+                      <div className="w-10 h-10 bg-[#DFF2EC] rounded-xl flex items-center justify-center">
+                        <ClipboardOutline className="w-5 h-5 text-[#1A7A5E]" />
+                      </div>
+                      <span className="text-xs font-bold text-neutral-700 text-center leading-tight">Audit Log</span>
+                    </Link>
+
+                    <Link href="/admin/master-key" className="flex flex-col items-center justify-center gap-2 p-4 bg-white border border-[#D4DDD9] rounded-xl cursor-pointer hover:border-[#3DB891] hover:bg-[#F0FAF6] transition-all hover:translate-y-[-1px] hover:shadow-sm">
+                      <div className="w-10 h-10 bg-[#E0F0E0] rounded-xl flex items-center justify-center">
+                        <KeyOutline className="w-5 h-5 text-[#15803D]" />
+                      </div>
+                      <span className="text-xs font-bold text-neutral-700 text-center leading-tight">Master Key</span>
+                    </Link>
+                  </>
+                )}
 
               </div>
             </div>

@@ -85,13 +85,27 @@ export default function PdfModal({
                   </div>
                 </div>
 
-                {/* PDF Viewer via iframe */}
-                <div className="flex-1 bg-slate-100 dark:bg-slate-950">
-                  <iframe
-                    src={`${previewUrl}#toolbar=0&navpanes=0`}
-                    className="w-full h-full border-0"
-                    title={title}
-                  />
+                {/* PDF Viewer via iframe or loading animation */}
+                <div className="flex-1 bg-slate-100 dark:bg-slate-950 flex flex-col">
+                  {!previewUrl ? (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900 gap-4 flex-1">
+                      <div className="relative w-16 h-16 flex items-center justify-center">
+                        {/* Animated outer ring */}
+                        <div className="absolute inset-0 rounded-2xl border-4 border-[#3DB891]/25 border-t-[#3DB891] animate-spin" />
+                        {/* DS Logo */}
+                        <img src="/Logo DS.png" alt="DS Logo" className="w-9 h-9 object-contain rounded-md animate-pulse" />
+                      </div>
+                      <p className="text-xs font-semibold text-slate-500 dark:text-slate-400 animate-pulse tracking-wide font-mono">
+                        MENDEKRIPSI DOKUMEN...
+                      </p>
+                    </div>
+                  ) : (
+                    <iframe
+                      src={`${previewUrl}#toolbar=0&navpanes=0`}
+                      className="w-full h-full border-0 flex-1"
+                      title={title}
+                    />
+                  )}
                 </div>
               </Dialog.Panel>
             </Transition.Child>

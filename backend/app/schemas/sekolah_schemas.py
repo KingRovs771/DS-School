@@ -3,6 +3,7 @@ Pydantic schemas untuk Sekolah, Siswa, Dokumen, AuditLog, Notifikasi, Admin
 """
 from datetime import date, datetime
 from typing import Any, Optional
+import uuid
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -17,10 +18,13 @@ class SekolahBase(BaseModel):
     alamat: Optional[str] = None
     kota: Optional[str] = Field(None, max_length=100)
     provinsi: Optional[str] = Field(None, max_length=100)
+    kabupaten_id: Optional[uuid.UUID] = None
     kode_pos: Optional[str] = Field(None, max_length=10)
     telepon: Optional[str] = Field(None, max_length=20)
     email: Optional[EmailStr] = None
     website: Optional[str] = Field(None, max_length=255)
+    sindas_api_url: Optional[str] = Field(None, max_length=255)
+    sindas_api_key: Optional[str] = Field(None, max_length=255)
 
 
 class SekolahCreate(SekolahBase):
@@ -32,9 +36,12 @@ class SekolahUpdate(BaseModel):
     alamat: Optional[str] = None
     kota: Optional[str] = None
     provinsi: Optional[str] = None
+    kabupaten_id: Optional[uuid.UUID] = None
     telepon: Optional[str] = None
     email: Optional[EmailStr] = None
-    website: Optional[str] = None
+    website: Optional[str] = Field(None, max_length=255)
+    sindas_api_url: Optional[str] = Field(None, max_length=255)
+    sindas_api_key: Optional[str] = Field(None, max_length=255)
     is_active: Optional[bool] = None
 
 
@@ -44,6 +51,30 @@ class SekolahResponse(SekolahBase):
     created_at: datetime
     updated_at: datetime
     # master_key_hash TIDAK dikembalikan ke client
+
+    model_config = {"from_attributes": True}
+
+class RegistrasiSekolahCreate(BaseModel):
+    nama_sekolah: str = Field(..., min_length=3, max_length=255)
+    kode_npsn: str = Field(..., min_length=2, max_length=20)
+    alamat: str = Field(..., min_length=5)
+    kabupaten_id: str = Field(..., description="UUID Kabupaten/Kota")
+    nama_pic: str = Field(..., min_length=2, max_length=255)
+    email_pic: EmailStr
+    telepon_pic: str = Field(..., min_length=6, max_length=20)
+
+class RegistrasiSekolahResponse(BaseModel):
+    id: int
+    nama_sekolah: str
+    kode_npsn: str
+    alamat: str
+    kabupaten_id: uuid.UUID
+    nama_pic: str
+    email_pic: str
+    telepon_pic: str
+    status: str
+    tanggal_daftar: datetime
+    tanggal_diproses: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
@@ -82,6 +113,7 @@ class SiswaUpdate(BaseModel):
     kelas: Optional[str] = None
     jurusan: Optional[str] = None
     angkatan: Optional[int] = Field(None, ge=1900, le=2100)
+    tahun_lulus: Optional[int] = Field(None, ge=1900, le=2100)
     email: Optional[EmailStr] = None
     telepon: Optional[str] = None
     telepon_ortu: Optional[str] = None
@@ -139,7 +171,7 @@ class DokumenUpdate(BaseModel):
 class DokumenResponse(DokumenBase):
     id: int
     siswa_id: int
-    filename_asli: Optional[str] = None
+    original_filename: Optional[str] = None
     file_size_bytes: Optional[int] = None
     mime_type: Optional[str] = None
     status: str
@@ -151,6 +183,7 @@ class DokumenResponse(DokumenBase):
     expires_at: Optional[datetime] = None
     approved_at: Optional[datetime] = None
     download_url: Optional[str] = None  # Presigned URL, diisi oleh service
+    siswa: Optional[SiswaResponse] = None
     # file_path_encrypted, key_wrapped, file_hash_sha256 TIDAK dikembalikan
 
     model_config = {"from_attributes": True}
@@ -208,6 +241,7 @@ class AdminUpdate(BaseModel):
     role: Optional[str] = None
     is_active: Optional[bool] = None
     sekolah_id: Optional[int] = None
+    password: Optional[str] = Field(None, min_length=8, max_length=128)
 
 
 class AdminResponse(BaseModel):
@@ -303,7 +337,7 @@ class NotifikasiMarkReadRequest(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# TAHUN AJARAN
+# TAHUN AJARAN — per sekolah
 # ══════════════════════════════════════════════════════════════════════════════
 
 class TahunAjaranBase(BaseModel):
@@ -312,11 +346,14 @@ class TahunAjaranBase(BaseModel):
 
 
 class TahunAjaranCreate(TahunAjaranBase):
-    pass
+    # sekolah_id opsional: jika super_admin mengelola sekolah lain, isi ini.
+    # Jika admin biasa (punya sekolah_id), akan diabaikan dan pakai sekolah admin.
+    sekolah_id: Optional[int] = Field(None, description="ID sekolah pemilik (hanya super_admin)")
 
 
 class TahunAjaranResponse(TahunAjaranBase):
     id: int
+    sekolah_id: int
     created_at: datetime
     updated_at: datetime
 

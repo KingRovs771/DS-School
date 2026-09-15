@@ -9,6 +9,7 @@ export interface AdminProfile {
   username: string;
   email: string;
   role: string;
+  nama_lengkap?: string | null;
   sekolah_id?: number;
   last_login?: string;
   two_factor_enabled?: boolean;

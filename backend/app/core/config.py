@@ -92,6 +92,10 @@ class Settings(BaseSettings):
     SINDAS_DEFAULT_SEKOLAH_ID: int = 1              # Fallback sekolah_id jika tidak ada di payload
     SINDAS_ENABLED: bool = True                     # Feature flag — matikan jika SINDAS tidak tersedia
 
+    # ── Backup ─────────────────────────────────────────────────────────────
+    BACKUP_ENCRYPTION_KEY: str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    MINIO_BUCKET_BACKUP: str = "dms-backup"
+
 
 @lru_cache()
 def get_settings() -> Settings:

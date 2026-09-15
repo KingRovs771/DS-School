@@ -11,7 +11,7 @@ from sqlalchemy import (
     Boolean, DateTime, Enum, ForeignKey, Index,
     Integer, String, UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.core.database import Base
 
@@ -174,10 +174,6 @@ class Admin(Base):
         foreign_keys=[sekolah_id],
         back_populates="admin",
     )
-    sekolah_binaan: Mapped[list["Sekolah"]] = relationship(  # noqa: F821
-        "Sekolah",
-        secondary="dinas_sekolah_binaan",
-    )
     uploaded_dokumen: Mapped[list["Dokumen"]] = relationship(  # noqa: F821
         "Dokumen",
         foreign_keys="Dokumen.uploaded_by",
@@ -188,6 +184,12 @@ class Admin(Base):
         back_populates="admin",
         foreign_keys="AuditLog.user_id",
     )
+
+    @validates("nama_lengkap")
+    def validate_nama_lengkap(self, key, value):
+        if value is not None:
+            return " ".join([word.capitalize() for word in value.split()])
+        return value
 
     def __repr__(self) -> str:
         return f"<Admin id={self.id} username={self.username!r} role={self.role}>"

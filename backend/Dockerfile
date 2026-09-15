@@ -9,6 +9,7 @@ RUN apt-get update && apt-get install -y \
     tesseract-ocr-ind \
     poppler-utils \
     curl \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

@@ -5,16 +5,18 @@ import toast from "react-hot-toast";
 export interface TahunAjaran {
   id: number;
   tahun: string;
+  sekolah_id: number;
   is_default: boolean;
   created_at: string;
   updated_at: string;
 }
 
-export function useTahunAjaran() {
+export function useTahunAjaran(sekolahId?: number) {
   return useQuery({
-    queryKey: ["tahun-ajaran"],
+    queryKey: ["tahun-ajaran", sekolahId],
     queryFn: async () => {
-      const res = await apiClient.get<TahunAjaran[]>("/tahun-ajaran");
+      const params = sekolahId ? `?sekolah_id=${sekolahId}` : "";
+      const res = await apiClient.get<TahunAjaran[]>(`/tahun-ajaran${params}`);
       return res.data;
     },
   });
@@ -23,7 +25,7 @@ export function useTahunAjaran() {
 export function useCreateTahunAjaran() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: async (data: { tahun: string; is_default: boolean }) => {
+    mutationFn: async (data: { tahun: string; is_default: boolean; sekolah_id?: number }) => {
       const res = await apiClient.post<TahunAjaran>("/tahun-ajaran", data);
       return res.data;
     },

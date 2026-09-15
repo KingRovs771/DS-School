@@ -51,7 +51,15 @@ export default function AdminSiswa() {
   // Modals state
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
+  const [bulkKelulusanModalOpen, setBulkKelulusanModalOpen] = useState(false);
   const [previewDocId, setPreviewDocId] = useState<number | null>(null);
+  const [editSiswaId, setEditSiswaId] = useState<number | null>(null);
+
+  const [bulkKelulusanForm, setBulkKelulusanForm] = useState({
+    angkatan: new Date().getFullYear(),
+    tahun_lulus: new Date().getFullYear().toString(),
+    kelas: "",
+  });
 
   // Edit doc state
   const [editDoc, setEditDoc] = useState<any | null>(null);
@@ -65,6 +73,7 @@ export default function AdminSiswa() {
     nama_lengkap: "",
     kelas: "",
     angkatan: new Date().getFullYear(),
+    tahun_lulus: "",
     tgl_lahir: "2008-01-01",
     email: "",
     telepon: "",
@@ -108,21 +117,23 @@ export default function AdminSiswa() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-siswa"] });
       toast.success("Siswa baru berhasil didaftarkan!");
-      setAddModalOpen(false);
-      setNewSiswa({
-        nis: "",
-        nisn: "",
-        nama_lengkap: "",
-        kelas: "",
-        angkatan: new Date().getFullYear(),
-        tgl_lahir: "2008-01-01",
-        email: "",
-        telepon: "",
-        sekolah_id: 1,
-      });
+      handleCloseAddModal();
     },
     onError: (err: any) => {
       toast.error(err.response?.data?.detail || "Gagal menambahkan siswa.");
+    },
+  });
+
+  // Mutation Edit/Update Siswa
+  const updateMutation = useMutation({
+    mutationFn: (data: { id: number; payload: any }) => adminSiswaApi.update(data.id, data.payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-siswa"] });
+      toast.success("Data siswa berhasil diperbarui!");
+      handleCloseAddModal();
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.detail || "Gagal memperbarui data siswa.");
     },
   });
 
@@ -132,10 +143,32 @@ export default function AdminSiswa() {
     onSuccess: (res: any) => {
       queryClient.invalidateQueries({ queryKey: ["admin-siswa"] });
       toast.success(res.data.message || "Bulk import siswa berhasil!");
+      const errs = res.data?.details?.errors;
+      if (Array.isArray(errs) && errs.length > 0) {
+        const contoh = errs.slice(0, 3).map((e: any) => `Baris ${e.baris}: ${e.alasan}`).join(" • ");
+        toast.error(
+          `${errs.length} baris dilewati. ${contoh}${errs.length > 3 ? " …" : ""}`,
+          { duration: 7000 }
+        );
+      }
       setImportModalOpen(false);
     },
     onError: (err: any) => {
       toast.error(err.response?.data?.detail || "Format file salah atau gagal import.");
+    },
+  });
+
+  // Mutation Kelulusan Massal
+  const bulkKelulusanMutation = useMutation({
+    mutationFn: (data: { angkatan: number; tahun_lulus: number | null; kelas?: string }) =>
+      adminSiswaApi.bulkKelulusan(data),
+    onSuccess: (res: any) => {
+      queryClient.invalidateQueries({ queryKey: ["admin-siswa"] });
+      toast.success(res.data.message || "Status kelulusan massal berhasil diperbarui!");
+      setBulkKelulusanModalOpen(false);
+    },
+    onError: (err: any) => {
+      toast.error(err.response?.data?.detail || "Gagal memperbarui status kelulusan massal.");
     },
   });
 
@@ -198,13 +231,75 @@ export default function AdminSiswa() {
     editDocMutation.mutate({ id: editDoc.id, formData });
   };
 
+  const handleOpenAddModal = (siswa?: any) => {
+    if (siswa) {
+      setEditSiswaId(siswa.id);
+      setNewSiswa({
+        nis: siswa.nis || "",
+        nisn: siswa.nisn || "",
+        nama_lengkap: siswa.nama_lengkap || "",
+        kelas: siswa.kelas || "",
+        angkatan: siswa.angkatan || new Date().getFullYear(),
+        tahun_lulus: siswa.tahun_lulus ? String(siswa.tahun_lulus) : "",
+        tgl_lahir: siswa.tgl_lahir ? siswa.tgl_lahir.split("T")[0] : "2008-01-01",
+        email: siswa.email || "",
+        telepon: siswa.telepon || "",
+        sekolah_id: siswa.sekolah_id || 1,
+      });
+    } else {
+      setEditSiswaId(null);
+      setNewSiswa({
+        nis: "",
+        nisn: "",
+        nama_lengkap: "",
+        kelas: "",
+        angkatan: new Date().getFullYear(),
+        tahun_lulus: "",
+        tgl_lahir: "2008-01-01",
+        email: "",
+        telepon: "",
+        sekolah_id: 1,
+      });
+    }
+    setAddModalOpen(true);
+  };
+
+  const handleCloseAddModal = () => {
+    setAddModalOpen(false);
+    setEditSiswaId(null);
+    setNewSiswa({
+      nis: "",
+      nisn: "",
+      nama_lengkap: "",
+      kelas: "",
+      angkatan: new Date().getFullYear(),
+      tahun_lulus: "",
+      tgl_lahir: "2008-01-01",
+      email: "",
+      telepon: "",
+      sekolah_id: 1,
+    });
+  };
+
   const handleAddSiswa = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSiswa.nis || !newSiswa.nama_lengkap || !newSiswa.kelas) {
       toast.error("NIS, Nama Lengkap, dan Kelas wajib diisi.");
       return;
     }
-    createMutation.mutate(newSiswa);
+    const parsedTahunLulus = newSiswa.tahun_lulus ? parseInt(newSiswa.tahun_lulus) : null;
+    if (editSiswaId) {
+      const { nis, nisn, ...updatePayload } = newSiswa;
+      updateMutation.mutate({ 
+        id: editSiswaId, 
+        payload: { ...updatePayload, tahun_lulus: parsedTahunLulus } 
+      });
+    } else {
+      createMutation.mutate({
+        ...newSiswa,
+        tahun_lulus: parsedTahunLulus
+      });
+    }
   };
 
   const handleImportExcel = (e: React.FormEvent<HTMLFormElement>) => {
@@ -232,6 +327,44 @@ export default function AdminSiswa() {
       console.error("Download error:", err);
       toast.error(`Gagal mengunduh dokumen: ${err?.message || "Unknown error"}`);
     }
+  };
+
+  // Helper to compute pagination range for beautiful UI/UX
+  const getPageNumbers = () => {
+    const range: (number | string)[] = [];
+    const delta = 1; // Number of pages to show on either side of the current page
+
+    if (totalPages <= 7) {
+      for (let i = 1; i <= totalPages; i++) {
+        range.push(i);
+      }
+    } else {
+      range.push(1);
+
+      let start = Math.max(2, currentPage - delta);
+      let end = Math.min(totalPages - 1, currentPage + delta);
+
+      if (currentPage <= 3) {
+        end = 4;
+      } else if (currentPage >= totalPages - 2) {
+        start = totalPages - 3;
+      }
+
+      if (start > 2) {
+        range.push("...");
+      }
+
+      for (let i = start; i <= end; i++) {
+        range.push(i);
+      }
+
+      if (end < totalPages - 1) {
+        range.push("...");
+      }
+
+      range.push(totalPages);
+    }
+    return range;
   };
 
   const filteredSiswa = siswaList; // now filtered by backend
@@ -304,7 +437,14 @@ export default function AdminSiswa() {
           </div>
 
           {/* Add Actions */}
-          <div className="flex gap-3 w-full md:w-auto justify-end">
+          <div className="flex gap-3 w-full md:w-auto justify-end flex-wrap">
+            <button
+              onClick={() => setBulkKelulusanModalOpen(true)}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-[#EEF3FF] hover:bg-[#DCE6FF] text-[#2B4CBE] border border-[#C5D3F5] text-xs font-bold rounded-xl transition-all shadow-sm"
+            >
+              <AcademicCapIcon className="w-4 h-4 text-[#2B4CBE]" />
+              Kelulusan Massal
+            </button>
             <button
               onClick={() => setImportModalOpen(true)}
               className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white hover:bg-[#F5F8F7] text-neutral-700 border border-[#D4DDD9] text-xs font-bold rounded-xl transition-all shadow-sm"
@@ -313,7 +453,7 @@ export default function AdminSiswa() {
               Import Excel
             </button>
             <button
-              onClick={() => setAddModalOpen(true)}
+              onClick={() => handleOpenAddModal()}
               className="flex items-center justify-center gap-2 px-4 py-2.5 bg-[#208C68] hover:bg-[#14503C] text-white text-xs font-bold rounded-xl transition-all shadow shadow-[#208C68]/10"
             >
               <PlusIcon className="w-4 h-4" />
@@ -367,7 +507,18 @@ export default function AdminSiswa() {
                           {siswa.kelas}
                         </span>
                       </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm font-semibold text-neutral-700">{siswa.angkatan}</td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="text-sm font-semibold text-neutral-700 block">{siswa.angkatan}</span>
+                        {siswa.tahun_lulus ? (
+                          <span className="inline-block mt-1 px-2 py-0.5 rounded bg-blue-100 border border-blue-200 text-blue-800 text-[10px] font-bold">
+                            Lulus ({siswa.tahun_lulus})
+                          </span>
+                        ) : (
+                          <span className="inline-block mt-1 px-2 py-0.5 rounded bg-emerald-100 border border-emerald-200 text-emerald-800 text-[10px] font-bold">
+                            Siswa Aktif
+                          </span>
+                        )}
+                      </td>
                       <td className="px-6 py-4 whitespace-nowrap">
                         <span className={clsx("text-xs block font-medium", siswa.email ? "text-neutral-600" : "text-neutral-400 italic")}>{siswa.email || "Belum ada email"}</span>
                         <span className={clsx("text-[10px] font-semibold block", siswa.telepon ? "text-[#8FA39B]" : "text-neutral-400 italic")}>{siswa.telepon || "Belum ada telp"}</span>
@@ -380,6 +531,13 @@ export default function AdminSiswa() {
                             title="Detail & Dokumen"
                           >
                             <EyeOutline className="w-4 h-4" />
+                          </button>
+                          <button
+                            onClick={() => handleOpenAddModal(siswa)}
+                            className="w-[28px] h-[28px] bg-blue-50 hover:bg-blue-100 rounded-lg flex items-center justify-center text-blue-600 transition-colors shadow-sm"
+                            title="Edit Siswa"
+                          >
+                            <PencilSquareIcon className="w-4 h-4" />
                           </button>
                           <button
                             onClick={() => {
@@ -416,20 +574,32 @@ export default function AdminSiswa() {
                   Sebelumnya
                 </button>
                 <div className="flex gap-1">
-                  {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => setCurrentPage(p)}
-                      className={clsx(
-                        "w-7 h-7 rounded-lg text-xs font-bold transition-all flex items-center justify-center",
-                        p === currentPage
-                          ? "bg-[#208C68] text-white"
-                          : "bg-white border border-[#D4DDD9] text-neutral-600 hover:bg-neutral-50"
-                      )}
-                    >
-                      {p}
-                    </button>
-                  ))}
+                  {getPageNumbers().map((p, idx) => {
+                    if (p === "...") {
+                      return (
+                        <span
+                          key={`ellipsis-${idx}`}
+                          className="w-7 h-7 flex items-center justify-center text-neutral-400 text-xs font-semibold select-none animate-pulse"
+                        >
+                          ...
+                        </span>
+                      );
+                    }
+                    return (
+                      <button
+                        key={p}
+                        onClick={() => setCurrentPage(p as number)}
+                        className={clsx(
+                          "w-7 h-7 rounded-lg text-xs font-bold transition-all flex items-center justify-center",
+                          p === currentPage
+                            ? "bg-[#208C68] text-white shadow shadow-[#208C68]/20"
+                            : "bg-white border border-[#D4DDD9] text-neutral-600 hover:bg-[#F5F8F7]"
+                        )}
+                      >
+                        {p}
+                      </button>
+                    );
+                  })}
                 </div>
                 <button
                   onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
@@ -525,6 +695,16 @@ export default function AdminSiswa() {
                         <div className="min-w-0 flex-1">
                           <p className="text-xs font-bold text-neutral-800 truncate">📄 {doc.jenis_dok} {doc.semester && `— Sem ${doc.semester}`}</p>
                           <p className="text-[10px] text-[#8FA39B] font-semibold mt-0.5">T.A. {doc.tahun_ajaran} · {formatBytes(doc.file_size || 0)}</p>
+                          {doc.legal_hold && (
+                            <span className="inline-flex items-center gap-0.5 mt-1 px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 text-[10px] font-bold tracking-wide">
+                              🔒 LEGAL HOLD
+                            </span>
+                          )}
+                          {doc.retention_expires_at && (
+                            <p className="text-[10px] text-amber-500 font-medium mt-0.5">
+                              ⏳ Kadaluarsa: {new Date(doc.retention_expires_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}
+                            </p>
+                          )}
                         </div>
                         <div className="flex items-center gap-1 ml-3">
                           <button
@@ -569,15 +749,17 @@ export default function AdminSiswa() {
           )}
         </div>
 
-        {/* ─── Modal Tambah Siswa Manual ─── */}
+        {/* ─── Modal Tambah/Edit Siswa Manual ─── */}
         {addModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
-            <div className="absolute inset-0 bg-[#0A2E1F]/60 backdrop-blur-xs" onClick={() => setAddModalOpen(false)} />
+            <div className="absolute inset-0 bg-[#0A2E1F]/60 backdrop-blur-xs" onClick={handleCloseAddModal} />
             
             <div className="bg-white border border-[#D4DDD9] w-full max-w-lg rounded-[28px] p-6 relative z-10 shadow-2xl overflow-hidden font-body text-neutral-800">
               <div className="flex items-center justify-between border-b border-[#EDF2F0] pb-3 mb-4">
-                <h3 className="font-display font-bold text-neutral-950 text-base">Registrasi Siswa Baru</h3>
-                <button onClick={() => setAddModalOpen(false)} className="w-8 h-8 rounded-lg hover:bg-[#F5F8F7] flex items-center justify-center text-[#8FA39B]">
+                <h3 className="font-display font-bold text-neutral-950 text-base">
+                  {editSiswaId ? "Edit Profil Siswa" : "Registrasi Siswa Baru"}
+                </h3>
+                <button onClick={handleCloseAddModal} className="w-8 h-8 rounded-lg hover:bg-[#F5F8F7] flex items-center justify-center text-[#8FA39B]">
                   <XMarkIcon className="w-5 h-5" />
                 </button>
               </div>
@@ -589,20 +771,22 @@ export default function AdminSiswa() {
                     <input
                       type="text"
                       required
+                      disabled={!!editSiswaId}
                       value={newSiswa.nis}
                       onChange={(e) => setNewSiswa({ ...newSiswa, nis: e.target.value })}
                       placeholder="e.g. 212204"
-                      className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-[#D4DDD9] bg-[#F5F8F7] text-neutral-800 focus:outline-none focus:border-[#3DB891]"
+                      className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-[#D4DDD9] bg-[#F5F8F7] text-neutral-800 disabled:opacity-60 focus:outline-none focus:border-[#3DB891]"
                     />
                   </div>
                   <div>
                     <label className="block text-[10px] font-bold text-neutral-700 mb-1.5 uppercase">NISN</label>
                     <input
                       type="text"
+                      disabled={!!editSiswaId}
                       value={newSiswa.nisn}
                       onChange={(e) => setNewSiswa({ ...newSiswa, nisn: e.target.value })}
                       placeholder="e.g. 00812345"
-                      className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-[#D4DDD9] bg-[#F5F8F7] text-neutral-800 focus:outline-none focus:border-[#3DB891]"
+                      className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-[#D4DDD9] bg-[#F5F8F7] text-neutral-800 disabled:opacity-60 focus:outline-none focus:border-[#3DB891]"
                     />
                   </div>
                 </div>
@@ -619,7 +803,7 @@ export default function AdminSiswa() {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-3 gap-3">
                   <div>
                     <label className="block text-[10px] font-bold text-neutral-700 mb-1.5 uppercase">Kelas *</label>
                     <input
@@ -637,6 +821,16 @@ export default function AdminSiswa() {
                       type="number"
                       value={newSiswa.angkatan}
                       onChange={(e) => setNewSiswa({ ...newSiswa, angkatan: parseInt(e.target.value) || new Date().getFullYear() })}
+                      className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-[#D4DDD9] bg-[#F5F8F7] text-neutral-800 focus:outline-none focus:border-[#3DB891]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold text-neutral-700 mb-1.5 uppercase">Tahun Lulus</label>
+                    <input
+                      type="number"
+                      value={newSiswa.tahun_lulus}
+                      onChange={(e) => setNewSiswa({ ...newSiswa, tahun_lulus: e.target.value })}
+                      placeholder="e.g. 2026 (Opsional)"
                       className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-[#D4DDD9] bg-[#F5F8F7] text-neutral-800 focus:outline-none focus:border-[#3DB891]"
                     />
                   </div>
@@ -678,17 +872,107 @@ export default function AdminSiswa() {
                 <div className="flex gap-3 justify-end pt-4 border-t border-[#EDF2F0]">
                   <button
                     type="button"
-                    onClick={() => setAddModalOpen(false)}
+                    onClick={handleCloseAddModal}
                     className="px-4 py-2 text-xs font-bold text-[#4A5350] bg-white border border-[#D4DDD9] rounded-xl hover:bg-[#F5F8F7]"
                   >
                     Batal
                   </button>
                   <button
                     type="submit"
-                    disabled={createMutation.isPending}
+                    disabled={createMutation.isPending || updateMutation.isPending}
                     className="px-4 py-2 text-xs font-bold text-white bg-[#208C68] hover:bg-[#14503C] rounded-xl disabled:opacity-50"
                   >
-                    {createMutation.isPending ? "Mendaftarkan..." : "Registrasi"}
+                    {editSiswaId 
+                      ? (updateMutation.isPending ? "Menyimpan..." : "Simpan Perubahan") 
+                      : (createMutation.isPending ? "Mendaftarkan..." : "Registrasi")
+                    }
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        {/* ─── Modal Kelulusan Massal Per Angkatan ─── */}
+        {bulkKelulusanModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+            <div className="absolute inset-0 bg-[#0A2E1F]/60 backdrop-blur-xs" onClick={() => setBulkKelulusanModalOpen(false)} />
+            
+            <div className="bg-white border border-[#D4DDD9] w-full max-w-md rounded-[28px] p-6 relative z-10 shadow-2xl overflow-hidden font-body text-neutral-800">
+              <div className="flex items-center justify-between border-b border-[#EDF2F0] pb-3 mb-4">
+                <h3 className="font-display font-bold text-neutral-950 text-base flex items-center gap-2">
+                  <AcademicCapIcon className="w-5 h-5 text-[#4361EE]" />
+                  Kelulusan Massal Per Angkatan
+                </h3>
+                <button onClick={() => setBulkKelulusanModalOpen(false)} className="w-8 h-8 rounded-lg hover:bg-[#F5F8F7] flex items-center justify-center text-[#8FA39B]">
+                  <XMarkIcon className="w-5 h-5" />
+                </button>
+              </div>
+              
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const parsedTahunLulus = bulkKelulusanForm.tahun_lulus.trim() ? parseInt(bulkKelulusanForm.tahun_lulus.trim()) : null;
+                  bulkKelulusanMutation.mutate({
+                    angkatan: Number(bulkKelulusanForm.angkatan),
+                    tahun_lulus: parsedTahunLulus,
+                    kelas: bulkKelulusanForm.kelas || undefined
+                  });
+                }}
+                className="space-y-4"
+              >
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-700 mb-1.5 uppercase">Pilih Angkatan *</label>
+                  <input
+                    type="number"
+                    required
+                    value={bulkKelulusanForm.angkatan}
+                    onChange={(e) => setBulkKelulusanForm({ ...bulkKelulusanForm, angkatan: parseInt(e.target.value) || new Date().getFullYear() })}
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-[#D4DDD9] bg-[#F5F8F7] text-neutral-800 focus:outline-none focus:border-[#3DB891]"
+                  />
+                  <p className="text-[10px] text-neutral-500 mt-1">Siswa pada angkatan ini akan diperbarui status kelulusannya.</p>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-700 mb-1.5 uppercase">Pilih Kelas (Opsional)</label>
+                  <select
+                    value={bulkKelulusanForm.kelas}
+                    onChange={(e) => setBulkKelulusanForm({ ...bulkKelulusanForm, kelas: e.target.value })}
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-[#D4DDD9] bg-[#F5F8F7] text-neutral-800 focus:outline-none focus:border-[#3DB891]"
+                  >
+                    <option value="">Semua Kelas</option>
+                    {availableClasses.map((kls: string) => (
+                      <option key={kls} value={kls}>{kls}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[10px] font-bold text-neutral-700 mb-1.5 uppercase">Tahun Kelulusan *</label>
+                  <input
+                    type="number"
+                    placeholder="e.g. 2026 (Kosongkan jika ingin mereset ke Siswa Aktif)"
+                    value={bulkKelulusanForm.tahun_lulus}
+                    onChange={(e) => setBulkKelulusanForm({ ...bulkKelulusanForm, tahun_lulus: e.target.value })}
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl border border-[#D4DDD9] bg-[#F5F8F7] text-neutral-800 focus:outline-none focus:border-[#3DB891]"
+                  />
+                  <p className="text-[10px] text-neutral-500 mt-1">
+                    Isi tahun kelulusan (misal `2026`) untuk meluluskan seluruh siswa angkatan, atau kosongkan untuk mereset menjadi Siswa Aktif.
+                  </p>
+                </div>
+
+                <div className="flex gap-3 justify-end pt-4 border-t border-[#EDF2F0]">
+                  <button
+                    type="button"
+                    onClick={() => setBulkKelulusanModalOpen(false)}
+                    className="px-4 py-2 text-xs font-bold text-[#4A5350] bg-white border border-[#D4DDD9] rounded-xl hover:bg-[#F5F8F7]"
+                  >
+                    Batal
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={bulkKelulusanMutation.isPending}
+                    className="px-4 py-2 text-xs font-bold text-white bg-[#4361EE] hover:bg-[#2B4CBE] rounded-xl disabled:opacity-50 shadow-sm"
+                  >
+                    {bulkKelulusanMutation.isPending ? "Memproses..." : "Proses Kelulusan Massal"}
                   </button>
                 </div>
               </form>

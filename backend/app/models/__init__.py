@@ -19,8 +19,8 @@ from app.models.tahun_ajaran import TahunAjaran
 # ── 2. Admin & Siswa (FK ke Sekolah) ──────────────────────────────────────────
 from app.models.admin import Admin, AdminRole
 from app.models.siswa import Siswa, KelasEnum
-from app.models.dinas_sekolah import dinas_sekolah_binaan
-
+from app.models.wilayah import KabupatenKota, DinasAdmin
+from app.models.registrasi import RegistrasiSekolah, RegistrasiStatus
 # ── 3. Dokumen (FK ke Admin + Siswa) ──────────────────────────────────────────
 from app.models.dokumen import (
     Dokumen,
@@ -35,6 +35,12 @@ from app.models.notifikasi import Notifikasi, TipeNotifikasi
 
 # ── 5. SindasSyncLog (FK ke Siswa + Sekolah) ──────────────────────────────────
 from app.models.sindas_sync_log import SindasSyncLog, SindasEventType, SindasSyncStatus
+
+# ── 6. RetentionPolicy & RetentionLog ──────────────────────────────────────────────
+from app.models.retention import RetentionPolicy, RetentionLog, AksiRetensi
+
+# ── 7. Backup & Restore ─────────────────────────────────────────────────────────────
+from app.models.backup import BackupRecord
 
 # ── Legacy models (dari versi sebelumnya — untuk backward compatibility) ──────
 from app.models.user import User, UserRole
@@ -51,6 +57,9 @@ __all__ = [
     "AuditLog", "AuditAction", "AuditStatus", "UserType",
     "Notifikasi", "TipeNotifikasi",
     "SindasSyncLog", "SindasEventType", "SindasSyncStatus",
+    "KabupatenKota", "DinasAdmin", "RegistrasiSekolah", "RegistrasiStatus",
+    "RetentionPolicy", "RetentionLog", "AksiRetensi",
+    "BackupRecord",
     # ── Legacy ─────────────────────────────────────────────────────────────────
     "User", "UserRole",
     "Document", "Category", "DocumentVersion", "DocumentStatus", "DocumentAccessLevel",

@@ -32,7 +32,11 @@ def get_minio_client() -> Minio:
 async def init_minio_buckets() -> None:
     """Create required buckets if they don't exist."""
     client = get_minio_client()
-    buckets = [settings.MINIO_BUCKET_DOCUMENTS, settings.MINIO_BUCKET_AVATARS]
+    buckets = [
+        settings.MINIO_BUCKET_DOCUMENTS,
+        settings.MINIO_BUCKET_AVATARS,
+        settings.MINIO_BUCKET_BACKUP,
+    ]
 
     try:
         for bucket in buckets:

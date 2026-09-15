@@ -2,7 +2,7 @@
  * pages/admin/master-key.tsx — Manajemen Kunci Master Sekolah (Kritis) dengan MFA & Ketik Konfirmasi Keamanan
  * Mengikuti spesifikasi [TABLE_COMPONENT], [TYPOGRAPHY], [SPACING_SHADOW] dari DESIGN.md
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Head from "next/head";
 import AdminLayout from "@/components/AdminLayout";
 import { useRequireAdmin } from "@/hooks/useAdminAuth";
@@ -10,13 +10,12 @@ import {
   KeyIcon,
   ExclamationTriangleIcon,
   ShieldCheckIcon,
-  InformationCircleIcon,
-  ClockIcon,
   CheckCircleIcon,
   ArrowPathIcon,
   DocumentDuplicateIcon,
   DevicePhoneMobileIcon,
-  XMarkIcon
+  XMarkIcon,
+  BuildingOffice2Icon,
 } from "@heroicons/react/24/solid";
 import {
   KeyIcon as KeyOutline,
@@ -36,6 +35,17 @@ const initialRotationHistory = [
   { id: 3, rotatedBy: "Admin IT (ID: 2)", date: "2025-05-15 14:22:45 WIB", status: "sukses", keySize: "RSA-4096" },
 ];
 
+interface SchoolMasterKey {
+  id: number;
+  nama: string;
+  npsn: string;
+  mk_version: number;
+  public_key_pem: string | null;
+  status: string;
+  total_dokumen: number;
+  is_active: boolean;
+}
+
 export default function AdminMasterKey() {
   useRequireAdmin();
 
@@ -45,29 +55,64 @@ export default function AdminMasterKey() {
   const [secret, setSecret] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
   const [disableCode, setDisableCode] = useState("");
-  // Status Master Key dari backend
+
+  // Status Master Key Sekolah yang terpilih
+  const [selectedSchoolId, setSelectedSchoolId] = useState<number | null>(null);
   const [mkVersion, setMkVersion] = useState(0);
   const [totalDokumen, setTotalDokumen] = useState(0);
+  const [activePublicKey, setActivePublicKey] = useState(
+    "-----BEGIN PUBLIC KEY-----\nMemuat kunci master..."
+  );
 
-  useEffect(() => {
-    const fetchStatus = async () => {
-      try {
-        const res = await masterKeyApi.getStatus();
-        setMkVersion(res.data.mk_version);
-        setTotalDokumen(res.data.total_dokumen);
-        if (res.data.active_public_key) {
-          setActivePublicKey(res.data.active_public_key);
-        }
-      } catch (err) {
-        console.error("Gagal mengambil status Master Key:", err);
-      }
-    };
-    fetchStatus();
-  }, []);
+  // List sekolah untuk Super Admin
+  const [schools, setSchools] = useState<SchoolMasterKey[]>([]);
+  const [loadingSchools, setLoadingSchools] = useState(false);
 
   const [showSetupModal, setShowSetupModal] = useState(false);
   const [showDisableModal, setShowDisableModal] = useState(false);
   const [loading2FA, setLoading2FA] = useState(false);
+
+  // Fetch all schools for superadmin
+  const fetchSchools = useCallback(async () => {
+    setLoadingSchools(true);
+    try {
+      const res = await masterKeyApi.getSchools();
+      setSchools(res.data || []);
+      if (res.data && res.data.length > 0 && selectedSchoolId === null) {
+        setSelectedSchoolId(res.data[0].id);
+      }
+    } catch (err) {
+      console.error("Gagal mengambil daftar kunci master sekolah:", err);
+    } finally {
+      setLoadingSchools(false);
+    }
+  }, [selectedSchoolId]);
+
+  // Fetch status for currently selected school
+  const fetchStatus = useCallback(async (sekolahId?: number) => {
+    try {
+      const res = await masterKeyApi.getStatus(sekolahId);
+      setMkVersion(res.data.mk_version);
+      setTotalDokumen(res.data.total_dokumen);
+      if (res.data.active_public_key) {
+        setActivePublicKey(res.data.active_public_key);
+      } else {
+        setActivePublicKey("Belum ada kunci publik terdaftar.");
+      }
+    } catch (err) {
+      console.error("Gagal mengambil status Master Key:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchSchools();
+  }, []);
+
+  useEffect(() => {
+    if (selectedSchoolId !== null) {
+      fetchStatus(selectedSchoolId);
+    }
+  }, [selectedSchoolId, fetchStatus]);
 
   const handleInitiate2FA = async () => {
     setLoading2FA(true);
@@ -103,7 +148,6 @@ export default function AdminMasterKey() {
   const handleEnable2FAWithoutMFA = async () => {
     setLoading2FA(true);
     try {
-      // Setup direct simulation to enable 2FA if backend OTP is not needed
       updateAdmin({ two_factor_enabled: true });
       toast.success("Authenticator 2FA berhasil diaktifkan!");
       setShow2FASetup(false);
@@ -152,9 +196,6 @@ export default function AdminMasterKey() {
   // States untuk modal rotasi kritis
   const [rotationModalOpen, setRotationModalOpen] = useState(false);
   const [confirmationInput, setConfirmationInput] = useState("");
-  const [activePublicKey, setActivePublicKey] = useState(
-    "-----BEGIN PUBLIC KEY-----\nMIICIjANBgkqhkiG9w0BAQEFAAOCAg8AMIICCgKCAgEA0Y5l4f+vX245a..."
-  );
 
   const handleCopyKey = () => {
     navigator.clipboard.writeText(activePublicKey);
@@ -166,6 +207,10 @@ export default function AdminMasterKey() {
       toast.error("Teks konfirmasi salah!");
       return;
     }
+    if (selectedSchoolId === null) {
+      toast.error("Silakan pilih sekolah terlebih dahulu!");
+      return;
+    }
 
     setRotationModalOpen(false);
     setIsRotating(true);
@@ -173,27 +218,26 @@ export default function AdminMasterKey() {
 
     try {
       setRotationProgress(40);
-      const res = await masterKeyApi.rotate(confirmationInput);
+      const res = await masterKeyApi.rotate(confirmationInput, selectedSchoolId);
       setRotationProgress(80);
       
       // Update data
       setMkVersion(res.data.version);
-      const statusRes = await masterKeyApi.getStatus();
-      if (statusRes.data.active_public_key) {
-        setActivePublicKey(statusRes.data.active_public_key);
-      }
+      await fetchStatus(selectedSchoolId);
+      await fetchSchools();
       
       setRotationProgress(100);
       
+      const targetSchool = schools.find(s => s.id === selectedSchoolId);
       const newLog = {
         id: history.length + 1,
-        rotatedBy: "Superadmin",
+        rotatedBy: `Superadmin (${targetSchool?.nama || "Sekolah"})`,
         date: new Date().toLocaleString("id-ID") + " WIB",
         status: "sukses",
         keySize: "RSA-4096"
       };
       setHistory([newLog, ...history]);
-      toast.success("Kunci master sekolah berhasil dirotasi!");
+      toast.success(`Kunci master sekolah "${targetSchool?.nama || ''}" berhasil dirotasi!`);
       
     } catch (err: any) {
       setRotationProgress(0);
@@ -204,6 +248,11 @@ export default function AdminMasterKey() {
         setRotationProgress(0);
       }, 1000);
     }
+  };
+
+  const getSelectedSchoolName = () => {
+    const s = schools.find(sch => sch.id === selectedSchoolId);
+    return s ? s.nama : `Sekolah ID ${selectedSchoolId}`;
   };
 
   return (
@@ -232,34 +281,34 @@ export default function AdminMasterKey() {
           
           {/* Kolom Kiri: Kunci RSA Aktif */}
           <div className="lg:col-span-2 bg-white border border-[#D4DDD9] rounded-[20px] p-6 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-[#EDF2F0] pb-3.5 mb-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-[#EDF2F0] pb-3.5 mb-2 gap-3">
               <h3 className="font-display font-bold text-neutral-950 text-sm flex items-center gap-2">
                 <KeyIcon className="w-5 h-5 text-[#208C68]" />
-                Kunci Publik Master Aktif (RSA-4096)
+                Kunci Publik Master - {getSelectedSchoolName()} (RSA-4096)
               </h3>
               <button
                 onClick={handleCopyKey}
-                className="text-xs font-bold text-[#14503C] hover:text-[#208C68] flex items-center gap-1 hover:underline"
+                className="text-xs font-bold text-[#14503C] hover:text-[#208C68] flex items-center gap-1 hover:underline self-end sm:self-auto"
               >
                 <DocumentDuplicateIcon className="w-4 h-4 text-[#208C68]" />
                 Salin Kunci
               </button>
             </div>
 
-            <div className="font-mono text-[10px] bg-[#F5F8F7] p-4 rounded-xl border border-[#D4DDD9] text-[#14503C] break-all select-all shadow-inner leading-relaxed">
+            <div className="font-mono text-[10px] bg-[#F5F8F7] p-4 rounded-xl border border-[#D4DDD9] text-[#14503C] break-all select-all shadow-inner leading-relaxed min-h-[140px]">
               {activePublicKey}
             </div>
 
             <div className="flex items-center justify-between pt-3">
               <div className="text-[11px] text-[#8FA39B] font-semibold flex items-center gap-1.5">
                 <ShieldCheckIcon className="w-4 h-4 text-[#208C68]" /> 
-                Status Enkripsi: {mkVersion > 0 ? `Aktif (v${mkVersion})` : "Belum Setup"} | Dokumen: {totalDokumen}
+                Status Enkripsi: {mkVersion > 0 ? `Aktif (v${mkVersion})` : "Belum Setup"} | Dokumen Terenkripsi: {totalDokumen}
               </div>
               
               <button
                 id="btn-rotasi-kunci"
                 onClick={() => setRotationModalOpen(true)}
-                disabled={isRotating}
+                disabled={isRotating || selectedSchoolId === null}
                 className="px-5 py-2.5 bg-[#208C68] hover:bg-[#14503C] text-white text-xs font-bold rounded-xl transition-all shadow shadow-[#208C68]/10 disabled:opacity-50"
               >
                 Rotasikan Kunci Master...
@@ -329,10 +378,92 @@ export default function AdminMasterKey() {
           </div>
         )}
 
+        {/* ─── Daftar Kunci Master Seluruh Sekolah (Super Admin) ─── */}
+        <div className="bg-white border border-[#D4DDD9] rounded-[20px] overflow-hidden shadow-sm">
+          <div className="px-6 py-4 border-b border-[#EDF2F0] bg-[#F5F8F7] flex items-center justify-between">
+            <div>
+              <h3 className="font-display font-bold text-neutral-950 text-sm">Status Kunci Master Seluruh Sekolah</h3>
+              <p className="text-[11px] font-semibold text-[#8FA39B] mt-0.5">Kelola dan rotasikan kunci master enkripsi institusi terdaftar</p>
+            </div>
+            <button
+              onClick={fetchSchools}
+              className="p-2 bg-white border border-[#D4DDD9] hover:bg-[#F5F8F7] text-neutral-400 hover:text-[#208C68] rounded-xl transition-all"
+              title="Refresh Data"
+            >
+              <ArrowPathIcon className={clsx("w-4 h-4", loadingSchools && "animate-spin")} />
+            </button>
+          </div>
+          {loadingSchools ? (
+            <div className="flex justify-center items-center py-12">
+              <div className="w-8 h-8 border-4 border-[#3DB891] border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : schools.length === 0 ? (
+            <div className="py-12 text-center text-xs text-[#8FA39B]">Belum ada sekolah terdaftar.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-[#F5F8F7] border-b border-[#D4DDD9]">
+                    <th className="px-6 py-3 text-left text-[11px] font-bold text-[#8FA39B] uppercase tracking-wider">Nama Sekolah</th>
+                    <th className="px-6 py-3 text-left text-[11px] font-bold text-[#8FA39B] uppercase tracking-wider">NPSN</th>
+                    <th className="px-6 py-3 text-left text-[11px] font-bold text-[#8FA39B] uppercase tracking-wider">Versi Kunci</th>
+                    <th className="px-6 py-3 text-left text-[11px] font-bold text-[#8FA39B] uppercase tracking-wider">Dokumen Terenkripsi</th>
+                    <th className="px-6 py-3 text-left text-[11px] font-bold text-[#8FA39B] uppercase tracking-wider">Status Enkripsi</th>
+                    <th className="px-6 py-3 text-right text-[11px] font-bold text-[#8FA39B] uppercase tracking-wider">Aksi</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-[#EDF2F0]">
+                  {schools.map((s) => (
+                    <tr
+                      key={s.id}
+                      onClick={() => setSelectedSchoolId(s.id)}
+                      className={clsx(
+                        "hover:bg-[#F0FAF6] transition-colors duration-120 cursor-pointer",
+                        selectedSchoolId === s.id && "bg-[#E0F5EE]"
+                      )}
+                    >
+                      <td className="px-6 py-4 text-xs font-bold text-neutral-800">{s.nama}</td>
+                      <td className="px-6 py-4 text-xs font-semibold text-neutral-500">{s.npsn}</td>
+                      <td className="px-6 py-4 text-xs font-mono text-[#0F4C39] font-bold">
+                        {s.mk_version > 0 ? `v${s.mk_version}` : "-"}
+                      </td>
+                      <td className="px-6 py-4 text-xs font-bold text-neutral-600">{s.total_dokumen}</td>
+                      <td className="px-6 py-4">
+                        <span
+                          className={clsx(
+                            "inline-flex items-center gap-1 px-2.5 py-0.5 rounded text-[10px] font-bold",
+                            s.mk_version > 0
+                              ? "bg-[#E0F5EE] text-[#0F4C39]"
+                              : "bg-red-50 text-red-750"
+                          )}
+                        >
+                          {s.mk_version > 0 ? "Aktif" : "Belum Setup"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedSchoolId(s.id);
+                            setRotationModalOpen(true);
+                          }}
+                          className="px-3 py-1.5 bg-[#208C68] hover:bg-[#14503C] text-white text-[10px] font-bold rounded-lg transition-all"
+                        >
+                          Rotasi Kunci
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+
         {/* ─── Row 3: History Rotasi Kunci ─── */}
         <div className="bg-white border border-[#D4DDD9] rounded-[20px] overflow-hidden shadow-sm">
           <div className="px-6 py-4 border-b border-[#EDF2F0] bg-[#F5F8F7]">
-            <h3 className="font-display font-bold text-neutral-950 text-sm">Riwayat Rotasi Kunci Master</h3>
+            <h3 className="font-display font-bold text-neutral-950 text-sm">Riwayat Tindakan Rotasi Kunci (Sesi Ini)</h3>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full border-collapse">
@@ -474,7 +605,7 @@ export default function AdminMasterKey() {
                   <button
                     type="button"
                     onClick={handleDisable2FAWithoutMFA}
-                    className="mr-auto text-xs font-bold text-red-650 hover:underline"
+                    className="mr-auto text-xs font-bold text-red-655 hover:underline"
                   >
                     Bypass OTP
                   </button>

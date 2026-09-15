@@ -15,7 +15,7 @@ const api = axios.create({
 api.interceptors.request.use(
   (config) => {
     if (typeof window !== "undefined") {
-      const isAdminRoute = config.url?.includes("/admin") || config.url?.includes("/statistik") || config.url?.includes("/audit-log") || config.url?.includes("/sindas") || config.url?.includes("/categories") || config.url?.includes("/tahun-ajaran");
+      const isAdminRoute = config.url?.includes("/admin") || config.url?.includes("/dinas") || config.url?.includes("/statistik") || config.url?.includes("/audit-log") || config.url?.includes("/sindas") || config.url?.includes("/categories") || config.url?.includes("/tahun-ajaran");
       const token = isAdminRoute
         ? (localStorage.getItem("admin_access_token") || localStorage.getItem("access_token"))
         : (localStorage.getItem("access_token") || localStorage.getItem("admin_access_token"));
@@ -37,7 +37,7 @@ api.interceptors.response.use(
     if (error.response?.status === 401 && !original._retry) {
       original._retry = true;
       try {
-        const isAdminRoute = original.url?.includes("/admin") || original.url?.includes("/statistik") || original.url?.includes("/audit-log") || original.url?.includes("/sindas") || original.url?.includes("/categories") || original.url?.includes("/tahun-ajaran");
+        const isAdminRoute = original.url?.includes("/admin") || original.url?.includes("/dinas") || original.url?.includes("/statistik") || original.url?.includes("/audit-log") || original.url?.includes("/sindas") || original.url?.includes("/categories") || original.url?.includes("/tahun-ajaran");
         const refreshKey = isAdminRoute ? "admin_refresh_token" : "refresh_token";
         const accessKey = isAdminRoute ? "admin_access_token" : "access_token";
         const refreshToken = localStorage.getItem(refreshKey);
@@ -54,7 +54,7 @@ api.interceptors.response.use(
       } catch {
         // Refresh gagal: clear storage & redirect
         if (typeof window !== "undefined") {
-          const isAdminRoute = original.url?.includes("/admin") || original.url?.includes("/statistik") || original.url?.includes("/audit-log");
+          const isAdminRoute = original.url?.includes("/admin") || original.url?.includes("/dinas") || original.url?.includes("/statistik") || original.url?.includes("/audit-log");
           if (isAdminRoute) {
             localStorage.removeItem("admin_access_token");
             localStorage.removeItem("admin_refresh_token");
@@ -64,6 +64,25 @@ api.interceptors.response.use(
             localStorage.removeItem("refresh_token");
             window.location.href = "/login";
           }
+        }
+      }
+    }
+    if (error.response?.status === 403) {
+      const detail = error.response?.data?.detail;
+      if (typeof detail === "string" && detail.includes("tidak aktif atau tidak ditemukan")) {
+        if (typeof window !== "undefined") {
+          localStorage.removeItem("admin_access_token");
+          localStorage.removeItem("admin_refresh_token");
+          localStorage.removeItem("access_token");
+          localStorage.removeItem("refresh_token");
+          
+          const isUserAdminRoute = original.url?.includes("/admin") || original.url?.includes("/dinas") || original.url?.includes("/statistik") || original.url?.includes("/audit-log") || original.url?.includes("/sindas") || original.url?.includes("/categories") || original.url?.includes("/tahun-ajaran");
+          if (isUserAdminRoute) {
+            window.location.href = "/admin/login?error=inactive";
+          } else {
+            window.location.href = "/login?error=inactive";
+          }
+          return new Promise(() => {}); // Stop request chain
         }
       }
     }
@@ -88,15 +107,15 @@ export const authApi = {
 };
 
 export const categoriesApi = {
-  getAll: () => api.get("/categories"),
+  getAll: (sekolah_id?: number) => api.get("/categories" + (sekolah_id ? `?sekolah_id=${sekolah_id}` : "")),
   create: (data: { name: string; description?: string; color?: string }) => api.post("/categories", data),
   delete: (id: number) => api.delete(`/categories/${id}`),
 };
 
 export const tahunAjaranApi = {
-  getAll: () => api.get("/tahun-ajaran"),
-  getDefault: () => api.get("/tahun-ajaran/default"),
-  create: (data: { tahun: string; is_default?: boolean }) => api.post("/tahun-ajaran", data),
+  getAll: (sekolahId?: number) => api.get("/tahun-ajaran" + (sekolahId ? `?sekolah_id=${sekolahId}` : "")),
+  getDefault: (sekolahId?: number) => api.get("/tahun-ajaran/default" + (sekolahId ? `?sekolah_id=${sekolahId}` : "")),
+  create: (data: { tahun: string; is_default?: boolean; sekolah_id?: number }) => api.post("/tahun-ajaran", data),
   setDefault: (id: number) => api.put(`/tahun-ajaran/${id}/set-default`),
   delete: (id: number) => api.delete(`/tahun-ajaran/${id}`),
 };
@@ -113,7 +132,7 @@ export const dokumenApi = {
 export const profilApi = {
   getSiswa: () => api.get("/auth/me"),
   updateProfil: (data: Partial<{ email: string; telepon: string }>) =>
-    api.put("/siswa/saya", data),
+    api.put("/auth/me", data),
   gantiPassword: (data: { old_password: string; new_password: string }) =>
     api.post("/auth/change-password", data),
   getRiwayatAkses: () => api.get("/audit-log/saya"),
@@ -143,6 +162,8 @@ export const adminSiswaApi = {
       headers: { "Content-Type": "multipart/form-data" },
     });
   },
+  bulkKelulusan: (data: { angkatan: number; tahun_lulus: number | null; kelas?: string }) =>
+    api.post("/admin/siswa/kelulusan-massal", data),
 };
 
 export const adminDokumenApi = {
@@ -215,16 +236,65 @@ export const adminAnomaliApi = {
 
 
 export const masterKeyApi = {
-  getStatus: () => api.get("/admin/master-key/status"),
-  rotate: (confirm: string) => api.post("/admin/master-key/rotate", { confirm }),
+  getStatus: (sekolahId?: number) => api.get("/admin/master-key/status" + (sekolahId ? `?sekolah_id=${sekolahId}` : "")),
+  rotate: (confirm: string, sekolahId?: number) => api.post("/admin/master-key/rotate" + (sekolahId ? `?sekolah_id=${sekolahId}` : ""), { confirm }),
+  getSchools: () => api.get("/admin/master-key/schools"),
 };
 
 export const dinasApi = {
-  getKepatuhan: () => api.get("/dinas/monitoring/kepatuhan"),
-  batchVerify: (data: any) => api.post("/dinas/verifikasi/batch", data),
+  getSekolah: () => api.get("/dinas/sekolah"),
+  getStatistik: () => api.get("/dinas/statistik"),
+  getDetailSekolah: (id: number) => api.get(`/dinas/sekolah/${id}/detail`),
+  getSekolahDokumen: (sekolahId: number) => api.get(`/dinas/sekolah/${sekolahId}/dokumen`),
+  getDokumenPreviewBlob: (docId: number) => api.get(`/dinas/dokumen/${docId}/preview`, { responseType: "blob" }),
+  getAuditLog: (limit: number = 50) => api.get(`/dinas/audit-log?limit=${limit}`),
+  getRegistrasi: (status?: string) => api.get("/dinas/registrasi" + (status ? `?status=${status}` : "")),
+  approveRegistrasi: (id: number) => api.post(`/dinas/registrasi/${id}/approve`),
+  rejectRegistrasi: (id: number) => api.post(`/dinas/registrasi/${id}/reject`),
 };
 
 export const sekolahApi = {
+  // Public & Registrasi
+  getKabupaten: () => api.get("/sekolah/kabupaten"),
+  syncKabupaten: (data: { provinsi: string; nama: string; kode_kemendagri: string }) => api.post("/sekolah/kabupaten/sync", data),
+  register: (data: any) => api.post("/sekolah/register", data),
   getBiodata: () => api.get("/sekolah/biodata"),
   updateBiodata: (data: any) => api.put("/sekolah/biodata", data),
+  getSindasConfig: () => api.get("/sekolah/sindas-config"),
+  updateSindasConfig: (data: { sindas_api_url?: string; sindas_api_key?: string }) => api.put("/sekolah/sindas-config", data),
+};
+
+export const superAdminApi = {
+  // Manajemen Dinas
+  getDinasUsers: (params?: { search?: string; page?: number; size?: number; kabupaten_id?: string }) => {
+    const qs = new URLSearchParams();
+    if (params?.search) qs.append("search", params.search);
+    if (params?.page) qs.append("page", params.page.toString());
+    if (params?.size) qs.append("size", params.size.toString());
+    if (params?.kabupaten_id) qs.append("kabupaten_id", params.kabupaten_id);
+    return api.get(`/superadmin/users/dinas?${qs.toString()}`);
+  },
+  createDinasUser: (data: any) => api.post("/superadmin/users/dinas", data),
+  updateDinasUser: (id: string, data: any) => api.put(`/superadmin/users/dinas/${id}`, data),
+  deleteDinasUser: (id: string) => api.delete(`/superadmin/users/dinas/${id}`),
+
+  // Manajemen Admin/TU Sekolah
+  getAdminSekolahUsers: (params?: { search?: string; page?: number; size?: number; sekolah_id?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.search) qs.append("search", params.search);
+    if (params?.page) qs.append("page", params.page.toString());
+    if (params?.size) qs.append("size", params.size.toString());
+    if (params?.sekolah_id) qs.append("sekolah_id", params.sekolah_id.toString());
+    return api.get(`/superadmin/users/admin-sekolah?${qs.toString()}`);
+  },
+  createAdminSekolahUser: (data: any) => api.post("/superadmin/users/admin-sekolah", data),
+  updateAdminSekolahUser: (id: number, data: any) => api.put(`/superadmin/users/admin-sekolah/${id}`, data),
+  deleteAdminSekolahUser: (id: number) => api.delete(`/superadmin/users/admin-sekolah/${id}`),
+
+  // Monitoring Sekolah
+  getMonitoringSekolah: () => api.get("/superadmin/monitoring/sekolah"),
+  getMonitoringDetailSekolah: (id: number) => api.get(`/superadmin/monitoring/sekolah/${id}/detail`),
+  getMonitoringSekolahDokumen: (id: number) => api.get(`/superadmin/monitoring/sekolah/${id}/dokumen`),
+  getMonitoringDokumenPreviewBlob: (id: number) => api.get(`/superadmin/monitoring/dokumen/${id}/preview`, { responseType: "blob" }),
+  getMonitoringDokumenDownloadBlob: (id: number) => api.get(`/superadmin/monitoring/dokumen/${id}/download`, { responseType: "blob" }),
 };

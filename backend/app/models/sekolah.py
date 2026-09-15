@@ -8,9 +8,11 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean, DateTime, Index, Integer,
-    String, Text, UniqueConstraint,
+    String, Text, UniqueConstraint, ForeignKey
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
 
 from app.core.database import Base
 
@@ -55,6 +57,12 @@ class Sekolah(Base):
         nullable=True,
         comment="Kota/kabupaten",
     )
+    kabupaten_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("kabupaten_kota.id"),
+        nullable=True,
+        comment="ID Kabupaten/Kota wilayah sekolah",
+    )
     provinsi: Mapped[str | None] = mapped_column(
         String(100),
         nullable=True,
@@ -79,6 +87,16 @@ class Sekolah(Base):
         String(255),
         nullable=True,
         comment="URL website sekolah",
+    )
+    sindas_api_url: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="Link API SINDAS untuk sekolah ini",
+    )
+    sindas_api_key: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="API Key SINDAS untuk sekolah ini",
     )
     # ── Keamanan ─────────────────────────────────────────────────────────────
     master_key_hash: Mapped[str] = mapped_column(
@@ -124,7 +142,17 @@ class Sekolah(Base):
     )
 
     # ── Relationships ─────────────────────────────────────────────────────────
+    # Relationship ke KabupatenKota
+    kabupaten = relationship("KabupatenKota", back_populates="sekolah_list")
+
     siswa: Mapped[list["Siswa"]] = relationship(  # noqa: F821
+        "Siswa",
+        back_populates="sekolah",
+        cascade="all, delete-orphan",
+    )
+
+    # Relationship untuk audit log 
+    audit_logs = relationship(  # noqa: F821
         "Siswa",
         back_populates="sekolah",
         cascade="all, delete-orphan",
@@ -134,6 +162,18 @@ class Sekolah(Base):
         back_populates="sekolah",
         cascade="all, delete-orphan",
     )
+
+    tahun_ajaran_list: Mapped[list["TahunAjaran"]] = relationship(  # noqa: F821
+        "TahunAjaran",
+        back_populates="sekolah",
+        cascade="all, delete-orphan",
+    )
+
+    @validates("nama")
+    def validate_nama(self, key, value):
+        if value is not None:
+            return " ".join([word.capitalize() for word in value.split()])
+        return value
 
     def __repr__(self) -> str:
         return f"<Sekolah id={self.id} kode={self.kode!r} nama={self.nama[:30]!r}>"

@@ -10,6 +10,7 @@ alembic>=1.13.1
 
 # Authentication & Security
 python-jose[cryptography]>=3.3.0
+pycryptodome>=3.20.0
 passlib[bcrypt]>=1.7.4
 bcrypt>=4.1.3
 
@@ -60,3 +61,4 @@ httpx>=0.27.0            # HTTP client async untuk pull data dari API SINDAS
 pymupdf>=1.24.4
 qrcode>=7.4.2
 pyotp>=2.9.0
+apscheduler>=3.10.4      # Background task scheduler untuk retention check harian

@@ -11,7 +11,7 @@ from sqlalchemy import (
     Boolean, Date, DateTime, Enum, ForeignKey,
     Index, Integer, String, Text, UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from app.core.database import Base
 
@@ -227,6 +227,12 @@ class Siswa(Base):
         back_populates="siswa",
         cascade="all, delete-orphan",
     )
+
+    @validates("nama_lengkap", "nama_ortu")
+    def validate_names(self, key, value):
+        if value is not None:
+            return " ".join([word.capitalize() for word in value.split()])
+        return value
 
     def __repr__(self) -> str:
         return f"<Siswa id={self.id} nis={self.nis!r} nama={self.nama_lengkap[:25]!r}>"
