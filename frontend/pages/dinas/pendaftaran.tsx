@@ -46,12 +46,6 @@ export default function PendaftaranSekolah() {
   const [copied, setCopied] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
-  useEffect(() => {
-    if (isAdminAuthenticated) {
-      fetchRegistrasi(statusFilter);
-    }
-  }, [statusFilter, isAdminAuthenticated]);
-
   const fetchRegistrasi = async (filter: StatusFilter) => {
     if (!isAdminAuthenticated) return;
     try {
@@ -67,7 +61,11 @@ export default function PendaftaranSekolah() {
     }
   };
 
-  if (!mounted || !isAdminAuthenticated) return null;
+  useEffect(() => {
+    if (isAdminAuthenticated) {
+      fetchRegistrasi(statusFilter);
+    }
+  }, [statusFilter, isAdminAuthenticated]);
 
   const handleApproveConfirm = async () => {
     if (!activeReg) return;
@@ -116,6 +114,8 @@ export default function PendaftaranSekolah() {
     { label: "Ditolak", value: "rejected", icon: XCircleIcon },
     { label: "Semua", value: "", icon: BuildingOffice2Icon },
   ];
+
+  if (!mounted || !isAdminAuthenticated) return null;
 
   return (
     <AdminLayout>

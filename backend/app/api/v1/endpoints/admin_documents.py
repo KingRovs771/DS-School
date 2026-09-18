@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.dependencies import get_current_admin, get_tu_sekolah
+from app.core.dependencies import get_current_admin, get_tu_sekolah, get_client_ip, get_client_user_agent
 from app.core.crypto import encrypt_document, decrypt_document, wrap_student_key, compute_file_hash
 from app.core.watermark import apply_watermark_and_qr, apply_pdf_permissions, derive_owner_password
 from app.models.admin import Admin
@@ -438,8 +438,8 @@ async def update_document_metadata(
                 user_id=current_admin.id,
                 action=AuditAction.DOKUMEN_UPDATE,
                 status=AuditStatus.FAILED,
-                ip_address=request.client.host if request.client else "unknown",
-                user_agent=request.headers.get("user-agent", ""),
+                ip_address=get_client_ip(request),
+                user_agent=get_client_user_agent(request),
                 detail={"dokumen_id": id, "error": "Gagal dekripsi berkas lama (Kunci rusak/Manipulasi ilegal)"}
             )
             db.add(audit)
@@ -458,8 +458,8 @@ async def update_document_metadata(
                 user_id=current_admin.id,
                 action=AuditAction.DOKUMEN_UPDATE,
                 status=AuditStatus.FAILED,
-                ip_address=request.client.host if request.client else "unknown",
-                user_agent=request.headers.get("user-agent", ""),
+                ip_address=get_client_ip(request),
+                user_agent=get_client_user_agent(request),
                 detail={"dokumen_id": id, "error": "Hash mismatch (File telah dimodifikasi pihak ketiga)"}
             )
             db.add(audit)
@@ -549,8 +549,8 @@ async def update_document_metadata(
         user_id=current_admin.id,
         action=AuditAction.DOKUMEN_UPDATE,
         status=AuditStatus.SUCCESS,
-        ip_address=request.client.host if request.client else "unknown",
-        user_agent=request.headers.get("user-agent", ""),
+        ip_address=get_client_ip(request),
+        user_agent=get_client_user_agent(request),
         detail={
             "dokumen_id": id,
             "alasan_edit": alasan_edit,
@@ -832,8 +832,8 @@ async def admin_download_document(
         user_id=current_admin.id,
         action=AuditAction.DOKUMEN_DOWNLOAD,
         status=AuditStatus.SUCCESS,
-        ip_address=request.client.host if request.client else "unknown",
-        user_agent=request.headers.get("user-agent", ""),
+        ip_address=get_client_ip(request),
+        user_agent=get_client_user_agent(request),
         detail={"dokumen_id": id, "filename": doc.original_filename}
     )
     db.add(audit)

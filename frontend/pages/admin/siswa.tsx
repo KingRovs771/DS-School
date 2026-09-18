@@ -891,6 +891,8 @@ export default function AdminSiswa() {
               </form>
             </div>
           </div>
+        )}
+
         {/* ─── Modal Kelulusan Massal Per Angkatan ─── */}
         {bulkKelulusanModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center px-4">

@@ -29,10 +29,6 @@ export default function Register() {
     telepon_pic: "",
   });
 
-  useEffect(() => {
-    fetchProvinces();
-  }, []);
-
   const fetchProvinces = async () => {
     try {
       const res = await fetch("/api/wilayah/provinces");
@@ -42,6 +38,10 @@ export default function Register() {
       toast.error("Gagal memuat daftar provinsi");
     }
   };
+
+  useEffect(() => {
+    fetchProvinces();
+  }, []);
 
   const handleProvChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
     const provCode = e.target.value;

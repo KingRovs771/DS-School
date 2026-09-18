@@ -15,6 +15,7 @@ from app.schemas.document import CategoryCreate, CategoryResponse
 router = APIRouter()
 
 
+@router.get("", response_model=list[CategoryResponse])
 @router.get("/", response_model=list[CategoryResponse])
 async def list_categories(
     sekolah_id: Optional[int] = Query(None, description="Filter berdasarkan ID sekolah"),
@@ -35,7 +36,7 @@ async def list_categories(
         if role_val in ("admin", "tu_sekolah"):
             # Paksa filter ke sekolah admin bersangkutan
             active_sekolah_id = user.sekolah_id
-            query = query.where(or_(Category.sekolah_id.is_(None), Category.sekolah_id == active_sekolah_id))
+            query = query.where(Category.sekolah_id == active_sekolah_id)
         elif role_val == "dinas_pendidikan":
             if sekolah_id:
                 # Verifikasi sekolah ada di wilayah Dinas
@@ -46,26 +47,63 @@ async def list_categories(
                 res_sch = await db.execute(stmt_sch)
                 if not res_sch.scalar():
                     raise HTTPException(status_code=403, detail="Sekolah di luar wilayah pantauan Anda")
-                query = query.where(or_(Category.sekolah_id.is_(None), Category.sekolah_id == sekolah_id))
+                query = query.where(Category.sekolah_id == sekolah_id)
             else:
-                # Dinas melihat kategori global + semua kategori dari sekolah di wilayahnya
+                # Dinas melihat semua kategori dari sekolah-sekolah di wilayahnya
                 stmt_schs = select(Sekolah.id).where(Sekolah.kabupaten_id == user.kabupaten_id)
                 res_schs = await db.execute(stmt_schs)
                 binaan_ids = [row[0] for row in res_schs.all()]
-                query = query.where(or_(Category.sekolah_id.is_(None), Category.sekolah_id.in_(binaan_ids)))
+                query = query.where(Category.sekolah_id.in_(binaan_ids))
         elif role_val == "super_admin":
             if sekolah_id:
-                query = query.where(or_(Category.sekolah_id.is_(None), Category.sekolah_id == sekolah_id))
+                query = query.where(Category.sekolah_id == sekolah_id)
     else:
         # Siswa/User biasa, paksa filter ke sekolah siswa tersebut
         active_sekolah_id = getattr(user, "sekolah_id", None)
         if active_sekolah_id:
-            query = query.where(or_(Category.sekolah_id.is_(None), Category.sekolah_id == active_sekolah_id))
+            query = query.where(Category.sekolah_id == active_sekolah_id)
         else:
             query = query.where(Category.sekolah_id.is_(None))
 
+    query = query.order_by(Category.name.asc())
     result = await db.execute(query)
-    return result.scalars().all()
+    cats = list(result.scalars().all())
+
+    # Jika sekolah_id ditentukan, sertakan juga jenis dokumen yang telah diupload pada tabel Dokumen sekolah ini
+    target_sch_id = None
+    if sekolah_id:
+        target_sch_id = sekolah_id
+    elif role_str and getattr(role_str, "value", role_str) in ("admin", "tu_sekolah") and getattr(user, "sekolah_id", None):
+        target_sch_id = user.sekolah_id
+
+    if target_sch_id:
+        from app.models.dokumen import Dokumen
+        from app.models.siswa import Siswa
+        from sqlalchemy import distinct
+        stmt_docs = (
+            select(distinct(Dokumen.jenis_dok))
+            .join(Siswa, Siswa.id == Dokumen.siswa_id)
+            .where(Siswa.sekolah_id == target_sch_id)
+        )
+        res_docs = await db.execute(stmt_docs)
+        doc_types = [row[0] for row in res_docs.all() if row[0]]
+        existing_cat_names = {c.name.lower() for c in cats}
+        
+        for dt in doc_types:
+            if dt.lower() not in existing_cat_names:
+                new_cat = Category(
+                    name=dt,
+                    description=dt.replace("_", " ").title(),
+                    color="#10B981",
+                    sekolah_id=target_sch_id
+                )
+                db.add(new_cat)
+                await db.commit()
+                await db.refresh(new_cat)
+                cats.append(new_cat)
+                existing_cat_names.add(dt.lower())
+
+    return cats
 
 
 @router.post("/", response_model=CategoryResponse, status_code=201)

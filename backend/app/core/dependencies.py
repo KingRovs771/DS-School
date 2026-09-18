@@ -3,10 +3,27 @@ Dependencies — FastAPI Dependency Injection untuk Otentikasi & Otorisasi
 ======================================================================
 Menyediakan helper otentikasi yang kuat untuk validasi JWT Admin dan Siswa.
 """
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+
+def get_client_ip(request: Request) -> str:
+    """Ekstrak IP Address klien yang sebenarnya (mendukung X-Forwarded-For dan X-Real-IP dari Nginx/Proxy)."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        return real_ip.strip()
+    if request.client and request.client.host:
+        return request.client.host
+    return "127.0.0.1"
+
+def get_client_user_agent(request: Request) -> str:
+    """Ekstrak Browser User-Agent dari request header."""
+    ua = request.headers.get("user-agent")
+    return ua.strip() if ua else "Unknown"
 
 from app.core.config import settings
 from app.core.database import get_db
@@ -21,7 +38,16 @@ logger = structlog.get_logger(__name__)
 security = HTTPBearer()
 
 
-from typing import Union
+import uuid
+from typing import Union, Any
+
+def is_valid_uuid(val: Any) -> bool:
+    try:
+        uuid.UUID(str(val))
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
+
 
 async def get_current_admin(
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -42,7 +68,12 @@ async def get_current_admin(
         
         raw_id = subject.split(":")[1]
         
-        if role == "dinas_pendidikan":
+        if role == "dinas_pendidikan" or subject.startswith("dinas:"):
+            if not is_valid_uuid(raw_id):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="ID dinas tidak valid"
+                )
             result = await db.execute(select(DinasAdmin).where(DinasAdmin.id == raw_id))
             dinas = result.scalar_one_or_none()
             if dinas is None or not dinas.is_active:
@@ -52,15 +83,26 @@ async def get_current_admin(
                 )
             return dinas
         else:
-            admin_id = int(raw_id)
-            result = await db.execute(select(Admin).where(Admin.id == admin_id))
-            admin = result.scalar_one_or_none()
-            if admin is None or not admin.is_active:
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Akun admin tidak aktif atau tidak ditemukan"
-                )
-            return admin
+            try:
+                admin_id = int(raw_id)
+                result = await db.execute(select(Admin).where(Admin.id == admin_id))
+                admin = result.scalar_one_or_none()
+                if admin and admin.is_active:
+                    return admin
+            except ValueError:
+                pass
+                
+            # Fallback: jika raw_id adalah valid UUID, cek DinasAdmin
+            if is_valid_uuid(raw_id):
+                result = await db.execute(select(DinasAdmin).where(DinasAdmin.id == raw_id))
+                dinas = result.scalar_one_or_none()
+                if dinas and dinas.is_active:
+                    return dinas
+
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Akun admin/dinas tidak aktif atau tidak ditemukan"
+            )
     except HTTPException:
         raise
     except Exception:
@@ -149,6 +191,9 @@ async def get_current_dinas_admin(
             dinas_id = subject.split(":")[1]
         else:
             raise credentials_exception
+
+        if not is_valid_uuid(dinas_id):
+            raise credentials_exception
     except Exception as e:
         logger.error(f"DEBUG_EXCEPTION in get_current_dinas_admin: {e}", exc_info=True)
         if isinstance(e, HTTPException):
@@ -210,7 +255,7 @@ async def get_current_any_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_db),
 ):
-    """Dependency: Memvalidasi token JWT dan mengembalikan Admin atau Siswa yang aktif."""
+    """Dependency: Memvalidasi token JWT dan mengembalikan Admin, DinasAdmin, atau Siswa yang aktif."""
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Token tidak valid atau kadaluarsa",
@@ -219,21 +264,46 @@ async def get_current_any_user(
     try:
         payload = decode_token(credentials.credentials)
         subject: str = payload.get("sub", "")
+        role = payload.get("role")
         if not subject:
             raise credentials_exception
         
-        if subject.startswith("admin:"):
-            admin_id = int(subject.split(":")[1])
-            result = await db.execute(select(Admin).where(Admin.id == admin_id))
-            admin = result.scalar_one_or_none()
-            if admin and admin.is_active:
-                return admin
-        elif subject.startswith("siswa:"):
+        if subject.startswith("siswa:"):
             siswa_id = int(subject.split(":")[1])
             result = await db.execute(select(Siswa).where(Siswa.id == siswa_id))
             siswa = result.scalar_one_or_none()
             if siswa and siswa.is_active:
                 return siswa
+        elif subject.startswith("dinas:"):
+            dinas_id = subject.split(":")[1]
+            if is_valid_uuid(dinas_id):
+                result = await db.execute(select(DinasAdmin).where(DinasAdmin.id == dinas_id))
+                dinas = result.scalar_one_or_none()
+                if dinas and dinas.is_active:
+                    return dinas
+        elif subject.startswith("admin:"):
+            raw_id = subject.split(":")[1]
+            if role == "dinas_pendidikan" and is_valid_uuid(raw_id):
+                result = await db.execute(select(DinasAdmin).where(DinasAdmin.id == raw_id))
+                dinas = result.scalar_one_or_none()
+                if dinas and dinas.is_active:
+                    return dinas
+            
+            try:
+                admin_id = int(raw_id)
+                result = await db.execute(select(Admin).where(Admin.id == admin_id))
+                admin = result.scalar_one_or_none()
+                if admin and admin.is_active:
+                    return admin
+            except ValueError:
+                pass
+
+            # Fallback: jika raw_id adalah valid UUID, cek DinasAdmin
+            if is_valid_uuid(raw_id):
+                result = await db.execute(select(DinasAdmin).where(DinasAdmin.id == raw_id))
+                dinas = result.scalar_one_or_none()
+                if dinas and dinas.is_active:
+                    return dinas
     except Exception:
         raise credentials_exception
     raise credentials_exception

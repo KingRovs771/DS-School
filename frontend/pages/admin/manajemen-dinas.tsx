@@ -54,13 +54,6 @@ export default function ManajemenDinasPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    if (isAdminAuthenticated) {
-      fetchUsers();
-      fetchProvinces();
-    }
-  }, [page, appliedSearch, isAdminAuthenticated]);
-
   const fetchUsers = async () => {
     if (!isAdminAuthenticated) return;
     try {
@@ -75,8 +68,6 @@ export default function ManajemenDinasPage() {
     }
   };
 
-  if (!mounted || !isAdminAuthenticated) return null;
-
   const fetchProvinces = async () => {
     try {
       const res = await fetch("/api/wilayah/provinces");
@@ -86,6 +77,13 @@ export default function ManajemenDinasPage() {
       console.error("Gagal memuat daftar provinsi", error);
     }
   };
+
+  useEffect(() => {
+    if (isAdminAuthenticated) {
+      fetchUsers();
+      fetchProvinces();
+    }
+  }, [page, appliedSearch, isAdminAuthenticated]);
 
   const handleProvChange = async (provCode: string) => {
     setSelectedProv(provCode);
@@ -214,6 +212,8 @@ export default function ManajemenDinasPage() {
       setDeleting(false);
     }
   };
+
+  if (!mounted || !isAdminAuthenticated) return null;
 
   return (
     <AdminLayout title="Manajemen Dinas">

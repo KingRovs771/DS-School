@@ -5,7 +5,16 @@ Menyediakan REST API otentikasi lengkap untuk admin dan siswa.
 """
 from datetime import datetime, timezone, timedelta
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, status
+import uuid
+from typing import Optional, Any
+
+def is_valid_uuid(val: Any) -> bool:
+    try:
+        uuid.UUID(str(val))
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,7 +26,8 @@ from app.core.security import (
     verify_password
 )
 from typing import Optional
-from app.core.dependencies import get_current_admin, security, HTTPAuthorizationCredentials
+from app.core.dependencies import get_current_admin, security, HTTPAuthorizationCredentials, get_client_ip, get_client_user_agent
+from app.models.audit_log import AuditLog, UserType, AuditAction, AuditStatus
 from app.core.totp import (
     generate_totp_secret,
     get_totp_uri,
@@ -75,7 +85,11 @@ class Disable2FARequest(BaseModel):
 # ─── ENDPOINTS ────────────────────────────────────────────────────────────────
 
 @router.post("/login/admin", tags=["Authentication"])
-async def login_admin(payload: AdminLoginRequest, db: AsyncSession = Depends(get_db)):
+async def login_admin(
+    payload: AdminLoginRequest, 
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
     """
     Login operator/admin sekolah menggunakan username atau email.
     Mengembalikan token JWT akses dan refresh.
@@ -141,6 +155,21 @@ async def login_admin(payload: AdminLoginRequest, db: AsyncSession = Depends(get
     access = create_access_token(subject=f"admin:{admin.id}", extra_claims={"role": admin.role})
     refresh = create_refresh_token(subject=f"admin:{admin.id}")
     
+    # Audit log login admin
+    audit_admin = AuditLog(
+        user_id=admin.id if not is_dinas else None,
+        user_type=UserType.ADMIN,
+        action=AuditAction.LOGIN,
+        ip_address=get_client_ip(request),
+        user_agent=get_client_user_agent(request),
+        endpoint=request.url.path,
+        http_method=request.method,
+        status=AuditStatus.SUCCESS,
+        detail={"identity": payload.username, "role": getattr(admin, "role", "dinas_pendidikan")}
+    )
+    db.add(audit_admin)
+    await db.commit()
+    
     logger.info("✅ Admin logged in successfully", admin_id=admin.id, role=admin.role)
     if is_dinas:
         admin_data = {
@@ -178,7 +207,11 @@ async def login_admin(payload: AdminLoginRequest, db: AsyncSession = Depends(get
 
 
 @router.post("/login/siswa", response_model=SiswaLoginResponse, tags=["Authentication"])
-async def login_siswa(payload: SiswaLoginRequest, db: AsyncSession = Depends(get_db)):
+async def login_siswa(
+    payload: SiswaLoginRequest, 
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
     """
     Login siswa menggunakan NIS dan password (tgl lahir YYYY-MM-DD atau password kustom).
     Mengembalikan token JWT akses dan refresh.
@@ -221,6 +254,21 @@ async def login_siswa(payload: SiswaLoginRequest, db: AsyncSession = Depends(get
     refresh = create_refresh_token(subject=f"siswa:{siswa.id}")
     
     logger.info("✅ Siswa logged in successfully", siswa_id=siswa.id, nis=siswa.nis)
+    
+    # Audit log login siswa
+    audit_siswa = AuditLog(
+        siswa_id=siswa.id,
+        user_type=UserType.SISWA,
+        action=AuditAction.LOGIN,
+        ip_address=get_client_ip(request),
+        user_agent=get_client_user_agent(request),
+        endpoint=request.url.path,
+        http_method=request.method,
+        status=AuditStatus.SUCCESS,
+        detail={"nis": siswa.nis, "nama": siswa.nama_lengkap}
+    )
+    db.add(audit_siswa)
+    await db.commit()
     return {
         "access_token": access,
         "refresh_token": refresh,
@@ -237,6 +285,9 @@ async def login_siswa(payload: SiswaLoginRequest, db: AsyncSession = Depends(get
     }
 
 
+from app.models.wilayah import DinasAdmin
+
+
 @router.post("/refresh", tags=["Authentication"])
 async def refresh_token(payload: RefreshRequest, db: AsyncSession = Depends(get_db)):
     """
@@ -248,9 +299,35 @@ async def refresh_token(payload: RefreshRequest, db: AsyncSession = Depends(get_
             raise HTTPException(status_code=400, detail="Token tipe tidak valid")
             
         subject = decoded.get("sub")
-        # Generate token akses baru
-        role = "siswa" if subject.startswith("siswa:") else "admin"
-        expires_delta = timedelta(hours=2) if role == "siswa" else None
+        # Cari role user yang sebenarnya dari database
+        if subject.startswith("siswa:"):
+            role = "siswa"
+            expires_delta = timedelta(hours=2)
+        elif subject.startswith("dinas:"):
+            role = "dinas_pendidikan"
+            expires_delta = None
+        elif subject.startswith("admin:"):
+            raw_id = subject.split(":")[1]
+            # Cek apakah DinasAdmin
+            dinas = None
+            if is_valid_uuid(raw_id):
+                res_dinas = await db.execute(select(DinasAdmin).where(DinasAdmin.id == raw_id))
+                dinas = res_dinas.scalar_one_or_none()
+            if dinas:
+                role = "dinas_pendidikan"
+            else:
+                try:
+                    admin_id = int(raw_id)
+                    res_admin = await db.execute(select(Admin).where(Admin.id == admin_id))
+                    admin = res_admin.scalar_one_or_none()
+                    role = getattr(admin.role, "value", admin.role) if admin else "admin"
+                except ValueError:
+                    role = "admin"
+            expires_delta = None
+        else:
+            role = "admin"
+            expires_delta = None
+
         access = create_access_token(
             subject=subject, 
             expires_delta=expires_delta,
@@ -420,6 +497,8 @@ async def get_current_user_me(
         elif subject.startswith("admin:"):
             raw_id = subject.split(":")[1]
             if role == "dinas_pendidikan":
+                if not is_valid_uuid(raw_id):
+                    raise HTTPException(status_code=401, detail="ID dinas tidak valid")
                 from app.models.wilayah import DinasAdmin
                 res = await db.execute(select(DinasAdmin).where(DinasAdmin.id == raw_id))
                 dinas = res.scalar_one_or_none()
@@ -510,6 +589,8 @@ async def change_password(
     elif subject.startswith("admin:"):
         raw_id = subject.split(":")[1]
         if role == "dinas_pendidikan":
+            if not is_valid_uuid(raw_id):
+                raise HTTPException(status_code=400, detail="ID dinas tidak valid")
             from app.models.wilayah import DinasAdmin
             res = await db.execute(select(DinasAdmin).where(DinasAdmin.id == raw_id))
             admin = res.scalar_one_or_none()

@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.dependencies import get_current_siswa
+from app.core.dependencies import get_current_siswa, get_client_ip, get_client_user_agent
 from app.core.crypto import decrypt_document
 from app.core.watermark import create_signed_token, apply_watermark_and_qr, apply_pdf_permissions, derive_owner_password
 from app.models.dokumen import Dokumen, StatusDokumen
@@ -280,8 +280,8 @@ async def download_document(
         dokumen_id=doc.id,
         resource_type="dokumen",
         resource_id=doc.id,
-        ip_address=request.client.host if request.client else None,
-        user_agent=request.headers.get("user-agent"),
+        ip_address=get_client_ip(request),
+        user_agent=get_client_user_agent(request),
         status=AuditStatus.SUCCESS
     )
     db.add(new_log)

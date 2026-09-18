@@ -65,14 +65,6 @@ export default function ManajemenSekolahPage() {
     generateMasterKey();
   };
 
-
-  useEffect(() => {
-    if (isAdminAuthenticated) {
-      fetchSekolahList();
-      fetchProvinces();
-    }
-  }, [isAdminAuthenticated]);
-
   const fetchProvinces = async () => {
     try {
       const res = await fetch("/api/wilayah/provinces");
@@ -82,6 +74,25 @@ export default function ManajemenSekolahPage() {
       console.error("Gagal memuat daftar provinsi", error);
     }
   };
+
+  const fetchSekolahList = async () => {
+    try {
+      setLoading(true);
+      const res = await api.get("/sekolah/");
+      setSekolahList(res.data);
+    } catch (err: any) {
+      toast.error(err.response?.data?.detail || "Gagal mengambil daftar sekolah");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isAdminAuthenticated) {
+      fetchSekolahList();
+      fetchProvinces();
+    }
+  }, [isAdminAuthenticated]);
 
   const handleProvChange = async (provCode: string) => {
     setSelectedProv(provCode);
@@ -107,18 +118,6 @@ export default function ManajemenSekolahPage() {
     setSelectedRegency(regCode);
     const regName = regencies.find(r => r.code === regCode)?.name || "";
     setFormData(prev => ({ ...prev, kota: regName }));
-  };
-
-  const fetchSekolahList = async () => {
-    try {
-      setLoading(true);
-      const res = await api.get("/sekolah/");
-      setSekolahList(res.data);
-    } catch (err: any) {
-      toast.error(err.response?.data?.detail || "Gagal mengambil daftar sekolah");
-    } finally {
-      setLoading(false);
-    }
   };
 
   const handleToggleStatus = async (id: number, currentStatus: boolean) => {

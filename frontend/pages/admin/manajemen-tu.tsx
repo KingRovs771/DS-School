@@ -51,13 +51,6 @@ export default function ManajemenTUPage() {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    if (isAdminAuthenticated) {
-      fetchUsers();
-      fetchSekolah();
-    }
-  }, [page, appliedSearch, isAdminAuthenticated]);
-
   const fetchUsers = async () => {
     if (!isAdminAuthenticated) return;
     try {
@@ -72,8 +65,6 @@ export default function ManajemenTUPage() {
     }
   };
 
-  if (!mounted || !isAdminAuthenticated) return null;
-
   const fetchSekolah = async () => {
     if (!isAdminAuthenticated) return;
     try {
@@ -83,6 +74,13 @@ export default function ManajemenTUPage() {
       console.error("Gagal mengambil data sekolah", err);
     }
   };
+
+  useEffect(() => {
+    if (isAdminAuthenticated) {
+      fetchUsers();
+      fetchSekolah();
+    }
+  }, [page, appliedSearch, isAdminAuthenticated]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -173,6 +171,8 @@ export default function ManajemenTUPage() {
       setDeleting(false);
     }
   };
+
+  if (!mounted || !isAdminAuthenticated) return null;
 
   return (
     <AdminLayout title="Manajemen TU & Admin">

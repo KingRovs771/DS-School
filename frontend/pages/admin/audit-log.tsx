@@ -161,12 +161,15 @@ export default function AdminAuditLog() {
               className="w-full px-3 py-2 text-xs font-bold rounded-xl border border-[#D4DDD9] bg-[#F5F8F7] text-neutral-800 focus:outline-none focus:border-[#3DB891]"
             >
               <option value="">Semua Jenis Aksi</option>
+              <option value="login">Login</option>
               <option value="login_admin">Login Admin</option>
               <option value="login_siswa">Login Siswa</option>
               <option value="tambah_siswa">Tambah Siswa</option>
               <option value="upload_dokumen">Upload Dokumen</option>
               <option value="download_dokumen">Download Dokumen</option>
               <option value="delete_dokumen">Delete Dokumen</option>
+              <option value="backup_created">Buat Backup</option>
+              <option value="backup_downloaded">Unduh Backup</option>
             </select>
 
             {/* Status */}

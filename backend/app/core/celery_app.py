@@ -19,10 +19,10 @@ celery_app.conf.update(
 # Autodiscover tasks from app.tasks package
 celery_app.autodiscover_tasks(["app"])
 
-# Schedule daily backup task
+# Schedule periodic check for automatic backup (every 60 seconds)
 celery_app.conf.beat_schedule = {
-    "scheduled-backup-daily": {
-        "task": "run_scheduled_backup",
-        "schedule": crontab(hour=2, minute=0),  # Setiap hari jam 02:00 WIB
+    "check-scheduled-backup-periodic": {
+        "task": "check_and_run_scheduled_backup",
+        "schedule": 60.0,  # Memeriksa jadwal setiap 60 detik
     },
 }

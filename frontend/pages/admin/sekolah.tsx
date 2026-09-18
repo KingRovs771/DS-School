@@ -33,12 +33,6 @@ export default function BiodataSekolahPage() {
   const [selectedProv, setSelectedProv] = useState("");
   const [selectedRegency, setSelectedRegency] = useState("");
 
-  useEffect(() => {
-    if (isAdminAuthenticated) {
-      fetchSekolah();
-    }
-  }, [isAdminAuthenticated]);
-
   const fetchProvinces = async () => {
     try {
       const res = await fetch("/api/wilayah/provinces");
@@ -97,6 +91,12 @@ export default function BiodataSekolahPage() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (isAdminAuthenticated) {
+      fetchSekolah();
+    }
+  }, [isAdminAuthenticated]);
 
   const handleProvChange = async (provCode: string) => {
     setSelectedProv(provCode);

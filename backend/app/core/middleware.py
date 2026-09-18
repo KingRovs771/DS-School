@@ -13,6 +13,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from sqlalchemy import select, func
 
 from app.core.database import AsyncSessionLocal
+from app.core.dependencies import get_client_ip, get_client_user_agent
 from app.core.security import decode_token
 from app.ml.anomaly_detector import anomaly_detector
 from app.models.audit_log import AuditLog, UserType, AuditAction, AuditStatus
@@ -23,10 +24,11 @@ logger = structlog.get_logger(__name__)
 EXCLUDED_PATHS = [
     "/health",
     "/metrics",
-    "/api/docs",
-    "/api/redoc",
+    "/docs",
+    "/redoc",
     "/openapi.json",
-    "/api/v1/auth/logout",
+    "/favicon.ico",
+    "/api/v1/auth/login", # Endpoint login biarkan lewat ke handler agar user bisa input
     "/api/v1/verify" # Verifikasi QR Code dilewati agar scan tetap lancar
 ]
 
@@ -57,8 +59,8 @@ class AnomalyDetectionMiddleware(BaseHTTPMiddleware):
                 pass
 
         # 3. Kumpulkan data fitur sesi via database local session
-        ip_address = request.client.host if request.client else "127.0.0.1"
-        user_agent = request.headers.get("user-agent", "Unknown")
+        ip_address = get_client_ip(request)
+        user_agent = get_client_user_agent(request)
         now_dt = datetime.now(timezone.utc)
         
         is_new_ip = False

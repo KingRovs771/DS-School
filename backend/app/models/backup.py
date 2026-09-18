@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 import uuid
-from sqlalchemy import String, BigInteger, ForeignKey, TIMESTAMP, Index, text, Integer
+from sqlalchemy import String, BigInteger, ForeignKey, TIMESTAMP, Index, text, Integer, Boolean
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 from app.core.database import Base
@@ -67,3 +67,28 @@ class BackupRecord(Base):
         TIMESTAMP(timezone=True),
         nullable=True,
     )
+
+
+class BackupScheduleConfig(Base):
+    __tablename__ = "backup_schedule_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
+    frequency: Mapped[str] = mapped_column(String(20), nullable=False, default="daily", server_default="daily")
+    time_of_day: Mapped[str] = mapped_column(String(5), nullable=False, default="02:00", server_default="'02:00'")
+    day_of_week: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    day_of_month: Mapped[int | None] = mapped_column(Integer, nullable=True, default=1)
+    last_run_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    next_run_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=text("NOW()"),
+    )
+    updated_by: Mapped[int | None] = mapped_column(
+        Integer,
+        ForeignKey("admin.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+

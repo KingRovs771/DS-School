@@ -119,14 +119,18 @@ export default function RetentionPolicyPage() {
   }, [isDinas, isSuperAdmin, isAdminAuthenticated]);
 
   // ─── Fetch Categories ──────────────────────────────────────────────────
+  const [loadingCategories, setLoadingCategories] = useState(false);
   const fetchCategories = useCallback(async (sekolah_id?: number) => {
     if (!isAdminAuthenticated) return;
     try {
+      setLoadingCategories(true);
       const { categoriesApi } = await import('@/lib/api');
       const res = await categoriesApi.getAll(sekolah_id);
       setCategories(res.data || []);
     } catch (e) {
       console.error('Gagal memuat kategori dokumen', e);
+    } finally {
+      setLoadingCategories(false);
     }
   }, [isAdminAuthenticated]);
 
@@ -220,12 +224,15 @@ export default function RetentionPolicyPage() {
       const initialSchoolId = selectedSchoolFilter ? Number(selectedSchoolFilter) : (schools[0]?.id || 0);
       setFormData({
         sekolah_id: initialSchoolId,
-        jenis_dok: categories[0]?.name || 'rapor',
+        jenis_dok: categories[0]?.name || 'raport',
         durasi_hari: 1825,
         aksi_setelah: 'archive',
         notif_hari_sebelum: 30,
         is_active: true,
       });
+      if (initialSchoolId) {
+        fetchCategories(initialSchoolId);
+      }
     }
     setShowForm(true);
   };
@@ -297,7 +304,7 @@ export default function RetentionPolicyPage() {
                 <p className="text-sm text-gray-500">Kelola durasi penyimpanan dokumen dan lindungi dokumen penting dengan Legal Hold</p>
               </div>
             </div>
-            {!isSuperAdmin && activeTab === 'policy' && (
+            {activeTab === 'policy' && (
               <button
                 onClick={() => handleOpenForm()}
                 className="flex items-center gap-2 px-4 py-2 bg-[#14503C] text-white rounded-xl text-sm font-semibold hover:bg-[#0d3b2a] transition-all"
@@ -345,7 +352,7 @@ export default function RetentionPolicyPage() {
                   onChange={(e) => setSelectedSchoolFilter(e.target.value)}
                   className="border border-gray-200 rounded-xl px-4 py-2 text-sm text-gray-700 focus:ring-2 focus:ring-[#3DB891] focus:border-transparent outline-none bg-white font-medium"
                 >
-                  <option value="">Semua Sekolah Binaan</option>
+                  <option value="">{isSuperAdmin ? 'Semua Sekolah' : 'Semua Sekolah Binaan'}</option>
                   {schools.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.nama} ({s.npsn})
@@ -389,7 +396,7 @@ export default function RetentionPolicyPage() {
                         <th className="px-4 py-3 text-left">Aksi Setelah Expired</th>
                         <th className="px-4 py-3 text-left">Notif Sebelum</th>
                         <th className="px-4 py-3 text-left">Status</th>
-                        {!isSuperAdmin && <th className="px-4 py-3 text-right">Aksi</th>}
+                        <th className="px-4 py-3 text-right">Aksi</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
@@ -423,24 +430,22 @@ export default function RetentionPolicyPage() {
                             )}
                           </td>
                           <td className="px-4 py-3">
-                            {!isSuperAdmin && (
-                              <div className="flex justify-end gap-2">
-                                <button
-                                  onClick={() => handleOpenForm(p)}
-                                  className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-500 transition-colors"
-                                  title="Edit"
-                                >
-                                  <PencilIcon className="w-4 h-4" />
-                                </button>
-                                <button
-                                  onClick={() => setDeleteId(p.id)}
-                                  className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 transition-colors"
-                                  title="Hapus"
-                                >
-                                  <TrashIcon className="w-4 h-4" />
-                                </button>
-                              </div>
-                            )}
+                            <div className="flex justify-end gap-2">
+                              <button
+                                onClick={() => handleOpenForm(p)}
+                                className="p-1.5 rounded-lg hover:bg-blue-50 text-blue-500 transition-colors"
+                                title="Edit"
+                              >
+                                <PencilIcon className="w-4 h-4" />
+                              </button>
+                              <button
+                                onClick={() => setDeleteId(p.id)}
+                                className="p-1.5 rounded-lg hover:bg-red-50 text-red-500 transition-colors"
+                                title="Hapus"
+                              >
+                                <TrashIcon className="w-4 h-4" />
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -500,7 +505,7 @@ export default function RetentionPolicyPage() {
                           <th className="px-4 py-3 text-left">Kadaluarsa</th>
                           <th className="px-4 py-3 text-left">Sisa Hari</th>
                           <th className="px-4 py-3 text-left">Status</th>
-                          {!isSuperAdmin && <th className="px-4 py-3 text-right">Legal Hold</th>}
+                          <th className="px-4 py-3 text-right">Legal Hold</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-gray-50">
@@ -534,30 +539,28 @@ export default function RetentionPolicyPage() {
                                 {doc.status}
                               </span>
                             </td>
-                            {!isSuperAdmin && (
-                              <td className="px-4 py-3 text-right">
-                                <button
-                                  onClick={async () => {
-                                    try {
-                                      if (doc.legal_hold) {
-                                        await retentionApi.releaseLegalHold(doc.id);
-                                        toast.success('Legal Hold dilepas');
-                                      } else {
-                                        await retentionApi.setLegalHold(doc.id, "Diatur oleh Dinas Pendidikan");
-                                        toast.success('Legal Hold diaktifkan');
-                                      }
-                                      fetchExpired();
-                                    } catch {
-                                      toast.error('Gagal mengubah status Legal Hold');
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                onClick={async () => {
+                                  try {
+                                    if (doc.legal_hold) {
+                                      await retentionApi.releaseLegalHold(doc.id);
+                                      toast.success('Legal Hold dilepas');
+                                    } else {
+                                      await retentionApi.setLegalHold(doc.id, isSuperAdmin ? "Diatur oleh Super Admin" : "Diatur oleh Dinas Pendidikan");
+                                      toast.success('Legal Hold diaktifkan');
                                     }
-                                  }}
-                                  className={`p-1.5 rounded-lg transition-colors ${doc.legal_hold ? 'text-red-500 hover:bg-red-50' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}
-                                  title={doc.legal_hold ? 'Lepas Legal Hold' : 'Set Legal Hold'}
-                                >
-                                  {doc.legal_hold ? <LockClosedIcon className="w-5 h-5" /> : <LockOpenIcon className="w-5 h-5" />}
-                                </button>
-                              </td>
-                            )}
+                                    fetchExpired();
+                                  } catch {
+                                    toast.error('Gagal mengubah status Legal Hold');
+                                  }
+                                }}
+                                className={`p-1.5 rounded-lg transition-colors ${doc.legal_hold ? 'text-red-500 hover:bg-red-50' : 'text-gray-400 hover:bg-gray-100 hover:text-gray-600'}`}
+                                title={doc.legal_hold ? 'Lepas Legal Hold' : 'Set Legal Hold'}
+                              >
+                                {doc.legal_hold ? <LockClosedIcon className="w-5 h-5" /> : <LockOpenIcon className="w-5 h-5" />}
+                              </button>
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -587,7 +590,13 @@ export default function RetentionPolicyPage() {
                   <label className="block text-sm font-medium text-gray-700 mb-1">Sekolah Target</label>
                   <select
                     value={formData.sekolah_id}
-                    onChange={(e) => setFormData((f) => ({ ...f, sekolah_id: Number(e.target.value) }))}
+                    onChange={(e) => {
+                      const newId = Number(e.target.value);
+                      setFormData((f) => ({ ...f, sekolah_id: newId }));
+                      if (newId) {
+                        fetchCategories(newId);
+                      }
+                    }}
                     disabled={!!editingId || schools.length === 0}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-[#3DB891] disabled:bg-gray-50 font-medium"
                   >
@@ -602,22 +611,42 @@ export default function RetentionPolicyPage() {
 
                 {/* Jenis Dokumen */}
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Jenis Dokumen</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-sm font-medium text-gray-700">Jenis Dokumen</label>
+                    {loadingCategories && (
+                      <span className="text-[11px] text-[#3DB891] flex items-center gap-1 font-medium">
+                        <ArrowPathIcon className="w-3 h-3 animate-spin" /> Memuat...
+                      </span>
+                    )}
+                  </div>
                   <select
                     value={formData.jenis_dok}
                     onChange={(e) => setFormData((f) => ({ ...f, jenis_dok: e.target.value }))}
-                    disabled={!!editingId || categories.length === 0}
+                    disabled={!!editingId || categories.length === 0 || loadingCategories}
                     className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-[#3DB891] disabled:bg-gray-50 font-medium capitalize"
                   >
-                    {categories.length === 0 && (
-                      <option value="">-- Tidak ada kategori tersedia --</option>
-                    )}
-                    {categories.map((cat) => (
-                      <option key={cat.id} value={cat.name}>
-                        {cat.name.replace(/_/g, ' ')}
+                    {categories.length === 0 ? (
+                      <option value="">
+                        {loadingCategories 
+                          ? "-- Sedang memuat jenis dokumen... --" 
+                          : "-- Belum ada jenis dokumen yang diinput oleh sekolah ini --"}
                       </option>
-                    ))}
+                    ) : (
+                      categories.map((cat) => (
+                        <option key={cat.id} value={cat.name}>
+                          {cat.name.replace(/_/g, ' ')}
+                          {cat.description && cat.description.toLowerCase() !== cat.name.replace(/_/g, ' ').toLowerCase() 
+                            ? ` (${cat.description})` 
+                            : ''}
+                        </option>
+                      ))
+                    )}
                   </select>
+                  {categories.length === 0 && !loadingCategories && formData.sekolah_id > 0 && (
+                    <p className="text-xs text-amber-600 mt-1">
+                      Sekolah ini belum memiliki jenis dokumen yang diinput/diupload. Silakan input jenis dokumen terlebih dahulu melalui akun sekolah terkait.
+                    </p>
+                  )}
                 </div>
 
                 {/* Durasi */}

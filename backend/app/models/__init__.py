@@ -40,7 +40,7 @@ from app.models.sindas_sync_log import SindasSyncLog, SindasEventType, SindasSyn
 from app.models.retention import RetentionPolicy, RetentionLog, AksiRetensi
 
 # ── 7. Backup & Restore ─────────────────────────────────────────────────────────────
-from app.models.backup import BackupRecord
+from app.models.backup import BackupRecord, BackupScheduleConfig
 
 # ── Legacy models (dari versi sebelumnya — untuk backward compatibility) ──────
 from app.models.user import User, UserRole
@@ -59,7 +59,7 @@ __all__ = [
     "SindasSyncLog", "SindasEventType", "SindasSyncStatus",
     "KabupatenKota", "DinasAdmin", "RegistrasiSekolah", "RegistrasiStatus",
     "RetentionPolicy", "RetentionLog", "AksiRetensi",
-    "BackupRecord",
+    "BackupRecord", "BackupScheduleConfig",
     # ── Legacy ─────────────────────────────────────────────────────────────────
     "User", "UserRole",
     "Document", "Category", "DocumentVersion", "DocumentStatus", "DocumentAccessLevel",

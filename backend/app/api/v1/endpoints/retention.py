@@ -46,6 +46,16 @@ from app.schemas.retention import (
 logger = structlog.get_logger(__name__)
 router = APIRouter()
 
+from typing import Optional, List, Union, Any
+
+def is_valid_uuid(val: Any) -> bool:
+    try:
+        uuid.UUID(str(val))
+        return True
+    except (ValueError, AttributeError, TypeError):
+        return False
+
+
 # ─── Custom Dependency ────────────────────────────────────────────────────────
 async def get_retention_manager(
     credentials: HTTPAuthorizationCredentials = Depends(security),
@@ -59,44 +69,45 @@ async def get_retention_manager(
     try:
         payload = decode_token(credentials.credentials)
         role = payload.get("role")
-        logger.error(f"DEBUG_RETENTION_PAYLOAD: {payload}")
         subject = payload.get("sub", "")
         if not subject:
             raise credentials_exception
 
-        if role == "dinas_pendidikan":
-            if subject.startswith("dinas:"):
-                dinas_id = subject.split(":")[1]
-            elif subject.startswith("admin:"):
-                dinas_id = subject.split(":")[1]
-            else:
-                raise credentials_exception
-            
-            result = await db.execute(select(DinasAdmin).where(DinasAdmin.id == dinas_id))
-            dinas = result.scalar_one_or_none()
-            if not dinas or not dinas.is_active:
-                raise HTTPException(status_code=403, detail="Akun dinas tidak aktif")
-            return dinas
-            
-        elif role == "super_admin":
-            if not subject.startswith("admin:"):
-                raise credentials_exception
-            admin_id = int(subject.split(":")[1])
+        raw_id = subject.split(":")[1]
+        
+        # 1. Cek apakah Super Admin (berdasarkan integer ID di tabel admin)
+        if raw_id.isdigit():
+            admin_id = int(raw_id)
             result = await db.execute(select(Admin).where(Admin.id == admin_id))
             admin = result.scalar_one_or_none()
-            logger.error(f"DEBUG_SUPER_ADMIN: subject={subject}, role={role}, admin={admin}, is_active={admin.is_active if admin else None}, db_role={admin.role if admin else None}, role_value={getattr(admin.role, 'value', admin.role) if admin else None}")
-            if not admin or not admin.is_active or getattr(admin.role, 'value', admin.role) != "super_admin":
-                logger.error(f"DEBUG: Raising 403 for super_admin")
-                raise HTTPException(status_code=403, detail="Akses ditolak")
-            logger.error(f"DEBUG: Returning admin for super_admin")
-            return admin
-        else:
-            logger.error(f"DEBUG_ROLE: Unknown role '{role}' with subject '{subject}'. Payload: {payload}")
-            raise HTTPException(status_code=403, detail="Hanya Dinas Pendidikan atau Super Admin yang diijinkan")
+            if admin and admin.is_active and getattr(admin.role, 'value', admin.role) == "super_admin":
+                return admin
+
+        # 2. Cek apakah DinasAdmin (berdasarkan UUID di tabel dinas_admin)
+        if is_valid_uuid(raw_id):
+            result = await db.execute(select(DinasAdmin).where(DinasAdmin.id == raw_id))
+            dinas = result.scalar_one_or_none()
+            if dinas:
+                if not dinas.is_active:
+                    raise HTTPException(status_code=403, detail="Akun dinas tidak aktif")
+                return dinas
+            
+        # 3. Fallback check untuk admin
+        try:
+            admin_id = int(raw_id)
+            result = await db.execute(select(Admin).where(Admin.id == admin_id))
+            admin = result.scalar_one_or_none()
+            if admin and admin.is_active and getattr(admin.role, 'value', admin.role) == "super_admin":
+                return admin
+        except ValueError:
+            pass
+
+        raise HTTPException(status_code=403, detail="Hanya Dinas Pendidikan atau Super Admin yang diijinkan")
             
     except HTTPException:
         raise
-    except Exception:
+    except Exception as e:
+        logger.error("Error in get_retention_manager", error=str(e))
         raise credentials_exception
 
 
@@ -150,17 +161,23 @@ async def create_retention_policy(
     db: AsyncSession = Depends(get_db),
 ):
     """Buat kebijakan retensi untuk sekolah tertentu."""
-    if not isinstance(manager, DinasAdmin):
-        raise HTTPException(status_code=403, detail="Hanya Dinas Pendidikan yang dapat membuat kebijakan")
+    is_super = isinstance(manager, Admin) and getattr(manager.role, 'value', manager.role) == "super_admin"
+    if not isinstance(manager, DinasAdmin) and not is_super:
+        raise HTTPException(status_code=403, detail="Hanya Dinas Pendidikan atau Super Admin yang dapat membuat kebijakan")
 
-    # Verifikasi sekolah berada di wilayah Dinas
-    stmt_sekolah = select(Sekolah).where(
-        Sekolah.id == body.sekolah_id,
-        Sekolah.kabupaten_id == manager.kabupaten_id
-    )
-    sekolah = (await db.execute(stmt_sekolah)).scalar_one_or_none()
-    if not sekolah:
-        raise HTTPException(status_code=403, detail="Sekolah ini tidak terdaftar di wilayah pantauan Anda")
+    # Verifikasi sekolah
+    if isinstance(manager, DinasAdmin):
+        stmt_sekolah = select(Sekolah).where(
+            Sekolah.id == body.sekolah_id,
+            Sekolah.kabupaten_id == manager.kabupaten_id
+        )
+        sekolah = (await db.execute(stmt_sekolah)).scalar_one_or_none()
+        if not sekolah:
+            raise HTTPException(status_code=403, detail="Sekolah ini tidak terdaftar di wilayah pantauan Anda")
+    else:
+        sekolah = (await db.execute(select(Sekolah).where(Sekolah.id == body.sekolah_id))).scalar_one_or_none()
+        if not sekolah:
+            raise HTTPException(status_code=404, detail="Sekolah tidak ditemukan")
 
     existing = await db.execute(select(RetentionPolicy).where(
         RetentionPolicy.sekolah_id == body.sekolah_id,
@@ -181,7 +198,7 @@ async def create_retention_policy(
     db.add(policy)
     await db.commit()
     await db.refresh(policy)
-    logger.info("Retention policy dibuat", sekolah_id=body.sekolah_id, jenis_dok=body.jenis_dok, dinas_id=str(manager.id))
+    logger.info("Retention policy dibuat", sekolah_id=body.sekolah_id, jenis_dok=body.jenis_dok, manager_id=str(manager.id))
     return policy
 
 
@@ -197,20 +214,22 @@ async def update_retention_policy(
     db: AsyncSession = Depends(get_db),
 ):
     """Update kebijakan retensi spesifik."""
-    if not isinstance(manager, DinasAdmin):
-        raise HTTPException(status_code=403, detail="Hanya Dinas Pendidikan yang dapat mengubah kebijakan")
+    is_super = isinstance(manager, Admin) and getattr(manager.role, 'value', manager.role) == "super_admin"
+    if not isinstance(manager, DinasAdmin) and not is_super:
+        raise HTTPException(status_code=403, detail="Hanya Dinas Pendidikan atau Super Admin yang dapat mengubah kebijakan")
 
     ref_policy = (await db.execute(select(RetentionPolicy).where(RetentionPolicy.id == policy_id))).scalar_one_or_none()
     if not ref_policy:
         raise HTTPException(status_code=404, detail="Kebijakan tidak ditemukan")
 
-    # Verifikasi kepemilikan wilayah
-    stmt_check = select(Sekolah).where(
-        Sekolah.id == ref_policy.sekolah_id,
-        Sekolah.kabupaten_id == manager.kabupaten_id
-    )
-    if not (await db.execute(stmt_check)).scalar_one_or_none():
-        raise HTTPException(status_code=403, detail="Kebijakan sekolah di luar wilayah pantauan Anda")
+    # Verifikasi kepemilikan wilayah jika DinasAdmin
+    if isinstance(manager, DinasAdmin):
+        stmt_check = select(Sekolah).where(
+            Sekolah.id == ref_policy.sekolah_id,
+            Sekolah.kabupaten_id == manager.kabupaten_id
+        )
+        if not (await db.execute(stmt_check)).scalar_one_or_none():
+            raise HTTPException(status_code=403, detail="Kebijakan sekolah di luar wilayah pantauan Anda")
 
     update_data = body.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -233,20 +252,22 @@ async def delete_retention_policy(
     db: AsyncSession = Depends(get_db),
 ):
     """Hapus kebijakan retensi spesifik."""
-    if not isinstance(manager, DinasAdmin):
-        raise HTTPException(status_code=403, detail="Hanya Dinas Pendidikan yang dapat menghapus kebijakan")
+    is_super = isinstance(manager, Admin) and getattr(manager.role, 'value', manager.role) == "super_admin"
+    if not isinstance(manager, DinasAdmin) and not is_super:
+        raise HTTPException(status_code=403, detail="Hanya Dinas Pendidikan atau Super Admin yang dapat menghapus kebijakan")
 
     ref_policy = (await db.execute(select(RetentionPolicy).where(RetentionPolicy.id == policy_id))).scalar_one_or_none()
     if not ref_policy:
         raise HTTPException(status_code=404, detail="Kebijakan tidak ditemukan")
 
-    # Verifikasi kepemilikan wilayah
-    stmt_check = select(Sekolah).where(
-        Sekolah.id == ref_policy.sekolah_id,
-        Sekolah.kabupaten_id == manager.kabupaten_id
-    )
-    if not (await db.execute(stmt_check)).scalar_one_or_none():
-        raise HTTPException(status_code=403, detail="Kebijakan sekolah di luar wilayah pantauan Anda")
+    # Verifikasi kepemilikan wilayah jika DinasAdmin
+    if isinstance(manager, DinasAdmin):
+        stmt_check = select(Sekolah).where(
+            Sekolah.id == ref_policy.sekolah_id,
+            Sekolah.kabupaten_id == manager.kabupaten_id
+        )
+        if not (await db.execute(stmt_check)).scalar_one_or_none():
+            raise HTTPException(status_code=403, detail="Kebijakan sekolah di luar wilayah pantauan Anda")
 
     await db.execute(delete(RetentionPolicy).where(
         RetentionPolicy.id == policy_id
@@ -332,8 +353,9 @@ async def set_legal_hold(
     manager: Union[DinasAdmin, Admin] = Depends(get_retention_manager),
     db: AsyncSession = Depends(get_db),
 ):
-    if not isinstance(manager, DinasAdmin):
-        raise HTTPException(status_code=403, detail="Hanya Dinas Pendidikan yang dapat mengelola Legal Hold")
+    is_super = isinstance(manager, Admin) and getattr(manager.role, 'value', manager.role) == "super_admin"
+    if not isinstance(manager, DinasAdmin) and not is_super:
+        raise HTTPException(status_code=403, detail="Hanya Dinas Pendidikan atau Super Admin yang dapat mengelola Legal Hold")
 
     doc = (await db.execute(
         select(Dokumen).options(selectinload(Dokumen.siswa)).where(Dokumen.id == doc_id)
@@ -344,9 +366,10 @@ async def set_legal_hold(
     if doc.legal_hold:
         raise HTTPException(status_code=409, detail="Dokumen sudah dalam status Legal Hold")
 
-    sekolah = (await db.execute(select(Sekolah).where(Sekolah.id == doc.siswa.sekolah_id))).scalar_one_or_none()
-    if not sekolah or sekolah.kabupaten_id != manager.kabupaten_id:
-        raise HTTPException(status_code=403, detail="Dokumen di luar wilayah Anda")
+    if isinstance(manager, DinasAdmin):
+        sekolah = (await db.execute(select(Sekolah).where(Sekolah.id == doc.siswa.sekolah_id))).scalar_one_or_none()
+        if not sekolah or sekolah.kabupaten_id != manager.kabupaten_id:
+            raise HTTPException(status_code=403, detail="Dokumen di luar wilayah Anda")
 
     now = datetime.now(timezone.utc)
     doc.legal_hold = True
@@ -355,9 +378,9 @@ async def set_legal_hold(
     doc.legal_hold_alasan = body.alasan
 
     db.add(AuditLog(
-        user_id=None,
+        user_id=manager.id if is_super else None,
         user_id_str=str(manager.id),
-        user_type=UserType.DINAS,
+        user_type=UserType.ADMIN if is_super else UserType.DINAS,
         action="legal_hold_set",
         dokumen_id=doc.id,
         resource_type="dokumen",
@@ -376,7 +399,7 @@ async def set_legal_hold(
 
     await db.commit()
     await db.refresh(doc)
-    logger.info("Legal hold SET by dinas", doc_id=doc_id, dinas_id=str(manager.id))
+    logger.info("Legal hold SET", doc_id=doc_id, manager_id=str(manager.id))
 
     return LegalHoldRead(
         dokumen_id=doc.id,
@@ -398,8 +421,9 @@ async def unset_legal_hold(
     manager: Union[DinasAdmin, Admin] = Depends(get_retention_manager),
     db: AsyncSession = Depends(get_db),
 ):
-    if not isinstance(manager, DinasAdmin):
-        raise HTTPException(status_code=403, detail="Hanya Dinas Pendidikan yang dapat mengelola Legal Hold")
+    is_super = isinstance(manager, Admin) and getattr(manager.role, 'value', manager.role) == "super_admin"
+    if not isinstance(manager, DinasAdmin) and not is_super:
+        raise HTTPException(status_code=403, detail="Hanya Dinas Pendidikan atau Super Admin yang dapat mengelola Legal Hold")
 
     doc = (await db.execute(
         select(Dokumen).options(selectinload(Dokumen.siswa)).where(Dokumen.id == doc_id)
@@ -410,9 +434,10 @@ async def unset_legal_hold(
     if not doc.legal_hold:
         raise HTTPException(status_code=409, detail="Dokumen tidak dalam status Legal Hold")
 
-    sekolah = (await db.execute(select(Sekolah).where(Sekolah.id == doc.siswa.sekolah_id))).scalar_one_or_none()
-    if not sekolah or sekolah.kabupaten_id != manager.kabupaten_id:
-        raise HTTPException(status_code=403, detail="Dokumen di luar wilayah Anda")
+    if isinstance(manager, DinasAdmin):
+        sekolah = (await db.execute(select(Sekolah).where(Sekolah.id == doc.siswa.sekolah_id))).scalar_one_or_none()
+        if not sekolah or sekolah.kabupaten_id != manager.kabupaten_id:
+            raise HTTPException(status_code=403, detail="Dokumen di luar wilayah Anda")
 
     doc.legal_hold = False
     doc.legal_hold_by = None
@@ -420,9 +445,9 @@ async def unset_legal_hold(
     doc.legal_hold_alasan = None
 
     db.add(AuditLog(
-        user_id=None,
+        user_id=manager.id if is_super else None,
         user_id_str=str(manager.id),
-        user_type=UserType.DINAS,
+        user_type=UserType.ADMIN if is_super else UserType.DINAS,
         action="legal_hold_released",
         dokumen_id=doc.id,
         resource_type="dokumen",
@@ -435,13 +460,13 @@ async def unset_legal_hold(
     db.add(RetentionLog(
         dokumen_id=doc.id,
         aksi="legal_hold_released",
-        alasan=f"Dilepas oleh Dinas Pendidikan",
+        alasan=f"Dilepas oleh {'Super Admin' if is_super else 'Dinas Pendidikan'}",
         dilakukan_oleh=None,
     ))
 
     await db.commit()
     await db.refresh(doc)
-    logger.info("Legal hold RELEASED by dinas", doc_id=doc_id, dinas_id=str(manager.id))
+    logger.info("Legal hold RELEASED", doc_id=doc_id, manager_id=str(manager.id))
 
     return LegalHoldRead(
         dokumen_id=doc.id,
