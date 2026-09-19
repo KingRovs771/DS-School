@@ -4,7 +4,6 @@ FastAPI Middleware — Deteksi Anomali Akses ML Otomatis
 Menyadap setiap request HTTP, mengekstrak fitur akses secara dinamis, 
 dan mengambil tindakan (lanjutkan, log peringatan, atau blokir 403) berdasarkan skor detektor.
 """
-import time
 from datetime import datetime, timezone, timedelta
 import structlog
 from fastapi import Request, status
@@ -16,7 +15,7 @@ from app.core.database import AsyncSessionLocal
 from app.core.dependencies import get_client_ip, get_client_user_agent
 from app.core.security import decode_token
 from app.ml.anomaly_detector import anomaly_detector
-from app.models.audit_log import AuditLog, UserType, AuditAction, AuditStatus
+from app.models.audit_log import AuditLog, UserType, AuditStatus
 
 logger = structlog.get_logger(__name__)
 

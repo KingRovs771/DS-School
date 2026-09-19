@@ -25,7 +25,6 @@ from app.core.security import (
     decode_token,
     verify_password
 )
-from typing import Optional
 from app.core.dependencies import get_current_admin, security, HTTPAuthorizationCredentials, get_client_ip, get_client_user_agent
 from app.models.audit_log import AuditLog, UserType, AuditAction, AuditStatus
 from app.core.totp import (
@@ -40,7 +39,6 @@ from app.models.admin import Admin
 from app.models.siswa import Siswa
 from app.schemas.sekolah_schemas import (
     AdminLoginRequest,
-    AdminTokenResponse,
     AdminResponse,
     SiswaResponse,
 )

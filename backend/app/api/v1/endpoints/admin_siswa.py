@@ -5,9 +5,8 @@ Menyediakan REST API pengelolaan profil siswa untuk admin sekolah.
 """
 import secrets
 import structlog
-from datetime import date
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Query
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession

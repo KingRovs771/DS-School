@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.dependencies import get_current_siswa, get_client_ip, get_client_user_agent
-from app.core.crypto import decrypt_document
 from app.core.watermark import create_signed_token, apply_watermark_and_qr, apply_pdf_permissions, derive_owner_password
 from app.models.dokumen import Dokumen, StatusDokumen
 from app.models.siswa import Siswa

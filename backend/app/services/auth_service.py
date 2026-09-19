@@ -2,7 +2,6 @@
 Auth Service — login, token, refresh
 """
 from datetime import datetime, timezone
-from typing import Optional
 
 import structlog
 from fastapi import HTTPException, status

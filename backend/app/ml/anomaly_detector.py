@@ -5,7 +5,6 @@ Menganalisis pola akses pengguna menggunakan model hybrid Isolation Forest (Scik
 dan LSTM (PyTorch) untuk menentukan tingkat kecurigaan aktivitas (score 0.0 - 1.0).
 """
 import os
-import io
 import pickle
 import numpy as np
 from sklearn.ensemble import IsolationForest

@@ -1,6 +1,6 @@
 import io
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, func, distinct
 from sqlalchemy.orm import selectinload
@@ -159,7 +159,7 @@ async def _decrypt_superadmin_doc(doc_id: int, db: AsyncSession):
         finally:
             response.close()
             response.release_conn()
-    except Exception as e:
+    except Exception:
         # Fallback dummy pdf
         dummy_pdf = (
             b"%PDF-1.4\n"

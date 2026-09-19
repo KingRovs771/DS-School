@@ -18,7 +18,7 @@ from typing import Optional, List, Union
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status, Request
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import select, and_, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -27,12 +27,12 @@ from app.core.database import get_db
 from app.core.security import decode_token
 from app.core.dependencies import security
 from app.models.admin import Admin
-from app.models.wilayah import DinasAdmin, KabupatenKota
+from app.models.wilayah import DinasAdmin
 from app.models.sekolah import Sekolah
 from app.models.dokumen import Dokumen
 from app.models.siswa import Siswa
 from app.models.retention import RetentionPolicy, RetentionLog
-from app.models.audit_log import AuditLog, UserType, AuditStatus
+from app.models.audit_log import AuditLog, UserType
 from app.schemas.retention import (
     RetentionPolicyCreate,
     RetentionPolicyUpdate,
@@ -40,13 +40,12 @@ from app.schemas.retention import (
     LegalHoldSetRequest,
     LegalHoldRead,
     DokumenAkanExpiredItem,
-    RetentionLogRead,
 )
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()
 
-from typing import Optional, List, Union, Any
+from typing import Any
 
 def is_valid_uuid(val: Any) -> bool:
     try:
@@ -68,7 +67,6 @@ async def get_retention_manager(
     )
     try:
         payload = decode_token(credentials.credentials)
-        role = payload.get("role")
         subject = payload.get("sub", "")
         if not subject:
             raise credentials_exception

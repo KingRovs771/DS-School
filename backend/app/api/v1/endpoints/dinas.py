@@ -226,7 +226,7 @@ async def dinas_preview_document(
         finally:
             response.close()
             response.release_conn()
-    except Exception as e:
+    except Exception:
         # Fallback dummy pdf if MinIO fails or file not found
         dummy_pdf = (
             b"%PDF-1.4\n"

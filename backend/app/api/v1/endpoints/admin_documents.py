@@ -6,22 +6,22 @@ Menyediakan REST API pengelolaan berkas dokumen akademik siswa untuk admin/opera
 import io
 import structlog
 from datetime import datetime, timezone
-from typing import Optional, Any
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, status, BackgroundTasks, Request
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.dependencies import get_current_admin, get_tu_sekolah, get_client_ip, get_client_user_agent
 from app.core.crypto import encrypt_document, decrypt_document, wrap_student_key, compute_file_hash
-from app.core.watermark import apply_watermark_and_qr, apply_pdf_permissions, derive_owner_password
+from app.core.watermark import apply_pdf_permissions, derive_owner_password
 from app.models.admin import Admin
 from app.models.siswa import Siswa
 from app.models.sekolah import Sekolah
 from app.models.dokumen import Dokumen, SemesterEnum, StatusDokumen
 from app.models.document import Category
-from app.schemas.sekolah_schemas import DokumenResponse, DokumenUpdate
+from app.schemas.sekolah_schemas import DokumenResponse
 from app.services.email_service import send_document_notification
 from app.ml.student_keygen import generate_key
 from app.models.audit_log import AuditLog, UserType, AuditAction, AuditStatus

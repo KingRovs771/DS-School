@@ -8,7 +8,7 @@ import enum
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (
-    Boolean, Date, DateTime, Enum, ForeignKey,
+    Boolean, Date, DateTime, ForeignKey,
     Index, Integer, String, Text, UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates

@@ -5,7 +5,7 @@ Menyediakan REST API visualisasi dashboard admin dan penelusuran audit trail len
 """
 import structlog
 from typing import Optional, Union
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 

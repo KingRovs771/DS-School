@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.core.dependencies import get_current_admin, get_tu_sekolah
+from app.core.dependencies import get_tu_sekolah
 from app.models.admin import Admin
 from app.models.sindas_sync_log import SindasSyncLog, SindasSyncStatus
 from app.schemas.sindas_schemas import (

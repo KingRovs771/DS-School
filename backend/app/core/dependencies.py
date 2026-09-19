@@ -25,7 +25,6 @@ def get_client_user_agent(request: Request) -> str:
     ua = request.headers.get("user-agent")
     return ua.strip() if ua else "Unknown"
 
-from app.core.config import settings
 from app.core.database import get_db
 from app.core.security import decode_token
 from app.models.admin import Admin

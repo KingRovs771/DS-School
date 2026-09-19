@@ -7,8 +7,6 @@ zero-storage, collision-resistant, dan irreversible dari data siswa.
 import hmac
 import hashlib
 import math
-import os
-import random
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Union

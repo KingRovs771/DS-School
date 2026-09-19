@@ -1,11 +1,10 @@
-import io
 import uuid
 from typing import Optional
 import logging
 from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status, Query, Header, Request
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query, Header, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select, desc
 from sqlalchemy.ext.asyncio import AsyncSession

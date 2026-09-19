@@ -4,7 +4,7 @@ Admin Anomali Endpoints — Monitoring Security Alerts
 Menyediakan REST API penelusuran alert keamanan anomali bagi administrator sekolah.
 """
 import structlog
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 

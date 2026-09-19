@@ -16,7 +16,7 @@ import hashlib
 import hmac
 import secrets
 import time
-from datetime import datetime, date, timezone
+from datetime import date
 from typing import Any, Optional
 
 import httpx
@@ -345,7 +345,6 @@ class SindasService:
         Mendukung pembuatan fallback data jika beberapa kolom dari SINDAS kosong.
         """
         import hashlib
-        from datetime import date
         
         nis = str(raw.get("nipd") or raw.get("nis") or "")
         name = raw.get("name") or raw.get("nama") or ""
@@ -609,7 +608,6 @@ class SindasService:
         Hitung statistik sinkronisasi hari ini untuk sekolah tertentu dan kembalikan sebagai SindasSyncStatusResponse.
         """
         from datetime import date as date_type
-        from sqlalchemy import cast, Date as SADate
 
         # Load sekolah
         stmt_sekolah = select(Sekolah).where(Sekolah.id == sekolah_id)

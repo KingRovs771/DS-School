@@ -15,7 +15,7 @@ from app.core.database import get_db
 from app.core.watermark import verify_signed_token
 from app.models.siswa import Siswa
 from app.models.dokumen import Dokumen
-from app.models.audit_log import AuditLog, UserType, AuditAction, AuditStatus
+from app.models.audit_log import AuditLog, UserType, AuditStatus
 
 logger = structlog.get_logger(__name__)
 router = APIRouter()

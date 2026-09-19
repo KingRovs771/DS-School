@@ -4,17 +4,16 @@ Document Service — upload, download, search, versioning
 import mimetypes
 import uuid
 from datetime import datetime
-from typing import Optional
 
 import structlog
-from fastapi import HTTPException, UploadFile, status
+from fastapi import HTTPException, UploadFile
 from sqlalchemy import or_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.minio_client import upload_file, get_presigned_url, delete_file
 from app.core.neural_keygen import get_neural_keygen
-from app.models.document import Document, DocumentVersion, DocumentStatus, Category
+from app.models.document import Document
 from app.models.user import User
 from app.schemas.document import (
     DocumentCreate, DocumentUpdate, DocumentSearchRequest,
